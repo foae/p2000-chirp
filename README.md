@@ -1,5 +1,9 @@
 # p2000-chirp
 
+[![CI](https://github.com/foae/p2000-chirp/actions/workflows/ci.yml/badge.svg)](https://github.com/foae/p2000-chirp/actions/workflows/ci.yml)
+[![release](https://img.shields.io/badge/release-v1.0.0-blue)](https://github.com/foae/p2000-chirp/releases)
+[![license: MIT](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
+
 Telegram notifications for [P2000](https://en.wikipedia.org/wiki/P2000_(network))
 emergency dispatches in your area — lightweight, self-hosted, ~10 seconds
 after dispatch.
@@ -24,7 +28,7 @@ areas you care about, and pushes a Telegram DM per incident.
 Requires [Bun](https://bun.sh) 1.3+.
 
 ```bash
-git clone <this repo> && cd p2000-chirp
+git clone https://github.com/foae/p2000-chirp.git && cd p2000-chirp
 bun install
 cp config.example.toml config.toml   # edit: your areas, postcodes, radius
 cp .env.example .env                # edit: your bot token + chat ID
@@ -205,5 +209,14 @@ bun test                                # unit tests (tz/DST, parsers, filters, 
 bun start --dry-run --debug --config config.toml
 ```
 
+Releases are cut with `scripts/release.sh vX.Y.Z` (verify → version bump →
+annotated tag → CI → GitHub release); see [CLAUDE.md](CLAUDE.md) for the
+versioning policy.
+
 See [AGENTS.md](AGENTS.md) for architecture notes, feed protocol details and
 contribution conventions.
+
+## License
+
+[MIT](./LICENSE) — feeds are third-party relays with no SLA; the software
+comes without any warranty.

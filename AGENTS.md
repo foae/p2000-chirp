@@ -123,3 +123,9 @@ with a concise conventional message. Push to the remote when the user asks
 asked for push in the session). Never commit `config.toml`, `.env`,
 `state/`, or anything containing the owner's personal data — verify with
 `git status` / `git diff --cached` before committing.
+
+Releases: cut one when changes land on `main` — `scripts/release.sh vX.Y.Z`
+verifies, bumps `package.json`, commits, creates an annotated tag, pushes,
+waits for CI and publishes the GitHub release. Major = breaking
+config/state/CLI changes, minor = features, patch = fixes. Never move a
+published tag. See CLAUDE.md for the agent-facing summary.
