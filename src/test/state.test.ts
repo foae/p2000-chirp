@@ -84,3 +84,20 @@ test("prefix dedupe respects the window", () => {
   store.markSeen("A2 Ambu 08123 DIA Groesbeek Rit 276252", "276252", t0);
   expect(store.hasSeenExtension("A2 Ambu 08123", 3_600_000, t0 + 3_600_001)).toBe(false);
 });
+
+test("bootstrap markers persist per source and survive reloads", () => {
+  const path = freshPath();
+  const store = new SeenStore(path);
+  expect(store.isSourceBootstrapped("rss:https://a.example/f")).toBe(false);
+  expect(store.isSourceBootstrapped("p2000alarm:https://b.example/r")).toBe(false);
+  store.markSourceBootstrapped("rss:https://a.example/f");
+  store.save();
+  const reloaded = new SeenStore(path);
+  expect(reloaded.isSourceBootstrapped("rss:https://a.example/f")).toBe(true);
+  expect(reloaded.isSourceBootstrapped("p2000alarm:https://b.example/r")).toBe(false);
+  reloaded.markSourceBootstrapped("p2000alarm:https://b.example/r");
+  reloaded.save();
+  const again = new SeenStore(path);
+  expect(again.isSourceBootstrapped("rss:https://a.example/f")).toBe(true);
+  expect(again.isSourceBootstrapped("p2000alarm:https://b.example/r")).toBe(true);
+});

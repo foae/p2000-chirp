@@ -17,8 +17,8 @@ bun start --dry-run --debug --config config.toml   # live smoke test
 The unit tests cover the pure logic and a saved p2000alarm fixture; the smoke
 test runs against the real feeds (they are always live). For a quick pipeline
 check use a permissive config (`postcodes = []`, `keywords = []`, `regions =
-[]`) and watch `[debug] cycle:` lines plus `[dry-run]` notifications. The
-example config itself is covered by a regression test (it once shipped
+[]`) and watch `[debug] poll <type>:` lines plus `[dry-run]` notifications.
+The example config itself is covered by a regression test (it once shipped
 broken). Docker: `docker build -t p2000-chirp .` then run with `-e
 DRY_RUN=true` and the volume mounts from `docker-compose.yaml`.
 
@@ -90,11 +90,16 @@ naive A/B/P mapping):**
 - **Dedupe design**: identity is message TEXT + trailing sequence number
   (5+ digits) within a time window, NOT timestamps — mirrors stamp times
   differently and radio frames arrive corrupted (same `bon 138437`, garbled
-  text). The window (default 3600 s) must EXCEED how long a feed retains old
-  items (~15–25 min for these sources), or retained items re-notify every
-  window; genuinely new dispatches still pass because their trailing
-  bon/rit/sequence numbers differ. Do not "fix" dedupe to use timestamps; it
-  was tried and it double-notifies.
+  text) or truncated (`A2 Ambu 08123` for `A2 Ambu 08123 DIA ... Rit
+  276252`, caught by the one-directional prefix layer: only a message
+  strictly shorter than one already delivered is a duplicate, so a longer
+  new dispatch is never suppressed). The window (default 3600 s) must
+  EXCEED how long a feed retains old items (~15–25 min for these sources),
+  or retained items re-notify every window; genuinely new dispatches still
+  pass because their trailing bon/rit/sequence numbers differ. Do not "fix"
+  dedupe to use timestamps; it was tried and it double-notifies. A message
+  currently being delivered is tracked in an in-flight set so concurrent
+  per-source polls cannot both send it.
 - Dead/gated sources (surveyed 2026-09): livep2000 RSS defunct since 2021;
   112-nu RSS requires an account; p2000-online.net is 1.5–2 min delayed. No
   official API, no websockets exist.
@@ -113,8 +118,19 @@ naive A/B/P mapping):**
 
 Quiet by default: one startup line, one line per delivered notification,
 one-time warnings (stale feed, per-source failure with recovery logging).
-`--debug` / `DEBUG=true` adds per-cycle item counts. Do not add per-cycle
+`--debug` / `DEBUG=true` adds per-poll item counts. Do not add per-poll
 logging to the default path.
+
+## Polling policy
+
+Sources poll on staggered slot schedules (slot grid anchored at process
+start, one slot residue per source) `poll_interval_seconds` apart, so a
+single source is polled at least every 15 s and each of N sources every
+(stagger x N) seconds — never in the same slot. Every poll gets 1-3 s
+random jitter. Failures back off exponentially (10-minute cap); 429s honor
+Retry-After with the same cap. Bootstrap (first-ever poll of a source
+marks its snapshot seen) is gated by a per-source marker persisted in the
+state file — it runs once per source lifetime, never on restarts.
 
 ## Git workflow
 

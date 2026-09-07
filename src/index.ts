@@ -1,7 +1,7 @@
 import { loadConfig } from "./config";
 import { fetchItems, type P2000Item } from "./feed";
 import { inferDiscipline, matchesArea, matchesDiscipline, normalizeMessage, trailingSequence } from "./filter";
-import { backoffMs, jitterMs, perSourceIntervalMs } from "./schedule";
+import { failureWaitMs, jitterMs, nextSlotMs, perSourceIntervalMs } from "./schedule";
 import { SeenStore } from "./state";
 import { sendTelegram } from "./telegram";
 
@@ -31,6 +31,7 @@ const dedupeWindowMs = config.dedupeWindowSeconds * 1000;
 const pruneMs = config.pruneHours * 3_600_000;
 const staggerMs = config.pollIntervalSeconds * 1000;
 const intervalMs = perSourceIntervalMs(config.pollIntervalSeconds, config.sources.length);
+const epoch = Date.now();
 
 process.on("SIGTERM", () => {
   store.save();
@@ -41,9 +42,12 @@ process.on("SIGINT", () => {
   process.exit(0);
 });
 
+const inFlight = new Set<string>();
+
 function isDuplicate(item: P2000Item): boolean {
   const now = Date.now();
   const message = normalizeMessage(item.message);
+  if (inFlight.has(message)) return true;
   const lastMsg = store.lastSeenMessage(message);
   if (lastMsg !== undefined && now - lastMsg < dedupeWindowMs) return true;
   const seq = trailingSequence(message);
@@ -98,29 +102,37 @@ function trackNewestAndStale(items: P2000Item[]): void {
   }
 }
 
-async function processItems(source: string, items: P2000Item[]): Promise<void> {
+async function processItems(label: string, items: P2000Item[]): Promise<void> {
+  items.sort((a, b) => a.pubDate.getTime() - b.pubDate.getTime());
   const fresh = items.filter(
     (item) =>
       !isDuplicate(item) && matchesArea(item, config.filters) && matchesDiscipline(item, config.filters.disciplines),
   );
   if (debug) {
-    console.log(`[debug] poll ${source}: ${items.length} items, fresh+relevant=${fresh.length}`);
+    console.log(`[debug] poll ${label}: ${items.length} items, fresh+relevant=${fresh.length}`);
   }
   try {
     for (const item of fresh) {
-      if (isDuplicate(item)) continue;
-      const text = format(item);
-      if (!dryRun) await sendTelegram(token!, chatId!, text);
-      store.markSeen(normalizeMessage(item.message), trailingSequence(normalizeMessage(item.message)));
-      console.log(
-        dryRun
-          ? `[dry-run] (${item.source}) ${text.replace(/\n/g, " | ")}`
-          : `[sent] (${item.source}) ${text.replace(/\n/g, " | ")}`,
-      );
+      const message = normalizeMessage(item.message);
+      if (isDuplicate(item) || inFlight.has(message)) continue;
+      inFlight.add(message);
+      try {
+        const text = format(item);
+        if (!dryRun) await sendTelegram(token!, chatId!, text);
+        store.markSeen(message, trailingSequence(message));
+        console.log(
+          dryRun
+            ? `[dry-run] (${item.source}) ${text.replace(/\n/g, " | ")}`
+            : `[sent] (${item.source}) ${text.replace(/\n/g, " | ")}`,
+        );
+      } catch (err) {
+        console.error(`[error] not delivered, will retry next poll: ${err instanceof Error ? err.message : err}`);
+        break;
+      } finally {
+        inFlight.delete(message);
+      }
       await Bun.sleep(300);
     }
-  } catch (err) {
-    console.error(`[error] not delivered, will retry next poll: ${err instanceof Error ? err.message : err}`);
   } finally {
     store.prune(pruneMs);
     store.save();
@@ -134,8 +146,8 @@ interface SourceRuntime {
 }
 
 const runtimes: SourceRuntime[] = config.sources.map((_, i) => ({
-  nextPollAt: Date.now() + i * staggerMs + Math.floor(Math.random() * 1000),
-  bootstrapped: false,
+  nextPollAt: epoch + i * staggerMs + jitterMs(),
+  bootstrapped: store.isSourceBootstrapped(sourceId(i)),
   failures: 0,
 }));
 
@@ -143,18 +155,15 @@ async function pollSource(i: number): Promise<void> {
   const rt = runtimes[i];
   const source = config.sources[i];
   const id = sourceId(i);
+  const slotOffset = i * staggerMs;
   let items: P2000Item[];
   try {
     items = await fetchItems(source);
   } catch (err) {
     rt.failures++;
-    const retryAfterMs = (err as { retryAfterMs?: number } | null)?.retryAfterMs;
-    const status = (err as { status?: number } | null)?.status;
-    let waitMs: number;
-    if (retryAfterMs !== undefined) waitMs = retryAfterMs;
-    else if (status === 429) waitMs = 60_000;
-    else waitMs = backoffMs(intervalMs, rt.failures);
-    rt.nextPollAt = Date.now() + waitMs + jitterMs();
+    const failure = err as { status?: number; retryAfterMs?: number };
+    const waitMs = failureWaitMs(failure, intervalMs, rt.failures);
+    rt.nextPollAt = nextSlotMs(epoch, slotOffset, intervalMs, Date.now() + waitMs) + jitterMs();
     if (!failedSources.has(id)) {
       failedSources.add(id);
       const msg = err instanceof Error ? err.message : String(err);
@@ -169,13 +178,14 @@ async function pollSource(i: number): Promise<void> {
     console.log(`[info] source recovered: ${source.type}`);
   }
   rt.failures = 0;
-  rt.nextPollAt = Date.now() + intervalMs + jitterMs();
+  rt.nextPollAt = nextSlotMs(epoch, slotOffset, intervalMs, Date.now()) + jitterMs();
   trackNewestAndStale(items);
   if (!rt.bootstrapped) {
     rt.bootstrapped = true;
     for (const item of items) {
       store.markSeen(normalizeMessage(item.message), trailingSequence(normalizeMessage(item.message)));
     }
+    store.markSourceBootstrapped(id);
     store.save();
     console.log(
       `[init] ${source.type} bootstrapped — ${items.length} existing feed items marked seen without notifying`,
@@ -183,7 +193,7 @@ async function pollSource(i: number): Promise<void> {
     return;
   }
   if (items.length === 0) return;
-  await processItems(source.type, items);
+  await processItems(`${source.type}[${i}]`, items);
 }
 
 const f = config.filters;
@@ -206,7 +216,11 @@ while (true) {
     if (runtimes[i].nextPollAt <= now) due.push(i);
   }
   if (due.length > 0) {
-    await Promise.all(due.map((i) => pollSource(i)));
+    try {
+      await Promise.all(due.map((i) => pollSource(i)));
+    } catch (err) {
+      console.error(`[error] poll failed: ${err instanceof Error ? err.message : err}`);
+    }
   }
   const nextAt = Math.min(...runtimes.map((rt) => rt.nextPollAt));
   await Bun.sleep(Math.max(250, nextAt - Date.now()));

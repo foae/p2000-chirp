@@ -4,11 +4,13 @@ import { dirname } from "node:path";
 interface StateShape {
   messages: Record<string, number>;
   sequences: Record<string, number>;
+  bootstrapped: Record<string, number>;
 }
 
 export class SeenStore {
   private messages = new Map<string, number>();
   private sequences = new Map<string, number>();
+  private bootstrappedSources = new Map<string, number>();
   private dirty = false;
   existed: boolean;
 
@@ -27,12 +29,26 @@ export class SeenStore {
           if (typeof ts === "number") this.sequences.set(key, ts);
         }
       }
+      if (parsed && typeof parsed.bootstrapped === "object" && parsed.bootstrapped !== null) {
+        for (const [key, ts] of Object.entries(parsed.bootstrapped)) {
+          if (typeof ts === "number") this.bootstrappedSources.set(key, ts);
+        }
+      }
     } catch {
       this.existed = false;
       console.warn(
         `[warn] state file "${path}" is corrupt or unreadable — starting with empty dedupe state (a fresh bootstrap will run)`,
       );
     }
+  }
+
+  isSourceBootstrapped(sourceId: string): boolean {
+    return this.bootstrappedSources.has(sourceId);
+  }
+
+  markSourceBootstrapped(sourceId: string): void {
+    this.bootstrappedSources.set(sourceId, Date.now());
+    this.dirty = true;
   }
 
   lastSeenMessage(message: string): number | undefined {
@@ -82,6 +98,7 @@ export class SeenStore {
     const state: StateShape = {
       messages: Object.fromEntries(this.messages),
       sequences: Object.fromEntries(this.sequences),
+      bootstrapped: Object.fromEntries(this.bootstrappedSources),
     };
     const dir = dirname(this.path);
     if (dir !== "" && dir !== ".") mkdirSync(dir, { recursive: true });

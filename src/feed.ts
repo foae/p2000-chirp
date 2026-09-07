@@ -23,10 +23,15 @@ export interface SourceConfig {
 export function httpError(res: Response, url: string): never {
   const err = new Error(`HTTP ${res.status} from ${url}`) as Error & { status: number; retryAfterMs?: number };
   err.status = res.status;
-  const retryAfterHeader = res.headers.get("retry-after");
-  if (retryAfterHeader !== null) {
-    const retryAfter = Number(retryAfterHeader);
-    if (Number.isFinite(retryAfter) && retryAfter >= 0) err.retryAfterMs = retryAfter * 1000;
+  const header = res.headers.get("retry-after");
+  if (header !== null && header.trim() !== "") {
+    const seconds = Number(header);
+    if (Number.isFinite(seconds) && seconds > 0) {
+      err.retryAfterMs = seconds * 1000;
+    } else {
+      const at = Date.parse(header);
+      if (Number.isFinite(at) && at > Date.now()) err.retryAfterMs = at - Date.now();
+    }
   }
   throw err;
 }

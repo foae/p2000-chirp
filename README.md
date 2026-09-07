@@ -78,7 +78,7 @@ TELEGRAM_CHAT_ID=123456789
 
 | Key | Meaning |
 |-----|---------|
-| `poll_interval_seconds` | Poll pacing: seconds between sources (staggered). Each source is polled every max(15, this × N-sources) seconds with 1–3 s random jitter; rate-limited sources back off. |
+| `poll_interval_seconds` | Poll pacing: seconds between sources (staggered). A single source is polled at least every 15 s; with N sources each is polled every (this × N) seconds — always with 1–3 s random jitter. Rate-limited sources back off. |
 | `stale_after_minutes` | One-time warning when the newest feed item gets older than this. |
 | `state_file` | Dedupe state (JSON); survives restarts; mount it in Docker. |
 | `prune_hours` | Seen-entries older than this are dropped. |
@@ -153,13 +153,20 @@ One incident arrives many times over: the same message is repeated under
 several capcodes (plus a `Gereserveerd` copy), each mirror relays it
 independently, and POCSAG radio transmissions occasionally arrive corrupted
 (`B2 AMBU 1720mdKt$i#3g450L ...` for `B2 AMBU 17205 Kleiweg ...`). An item is
-suppressed when either:
+suppressed when any of these holds:
 
 1. the exact message text was already delivered within
    `dedupe_window_seconds` (default 3600), or
 2. the message's trailing sequence number (`bon 138437`, `Rit 134293` style
    counters most P2000 messages end with) was already delivered within the
-   same window — this catches corrupted retransmissions.
+   same window — this catches corrupted retransmissions, or
+3. the message is a strict prefix of one already delivered within the same
+   window — this catches truncated radio retransmissions, which lose their
+   trailing sequence (e.g. `A2 Ambu 08123` for
+   `A2 Ambu 08123 DIA Groesbeek Rit 276252`). Deliberately one-directional:
+   a longer new dispatch is never suppressed by an earlier short one, so a
+   genuinely new dispatch can only be swallowed in the rare case that it is
+   itself a truncation of an unrelated recently delivered message.
 
 The window, not timestamps, drives dedupe: mirrors stamp times differently,
 so text is the only reliable identity. The window must exceed how long the
@@ -187,10 +194,11 @@ Adapters live in `src/sources/`; adding a feed type is one function returning
 ## Caveats
 
 - Both feeds are free third-party relays with no SLA. Sources are polled on
-  staggered, jittered schedules (never in lockstep); failing sources back off
-  exponentially (capped at 10 minutes) and HTTP 429s are honored via
-  `Retry-After`, so the daemon stays a polite client even when a mirror is
-  struggling. The daemon warns when a feed goes stale.
+  staggered, jittered slot schedules (one slot per source, never shared);
+  failing sources back off exponentially (capped at 10 minutes) and HTTP
+  429s are honored via `Retry-After` (also capped at 10 minutes), so the
+  daemon stays a polite client even when a mirror is struggling. The daemon
+  warns when a feed goes stale.
 - Politie items often carry no region metadata; discipline is taken from the
   source's own classification when available (RSS `Dienst` field /
   p2000alarm record class) and otherwise inferred from the message prefix —

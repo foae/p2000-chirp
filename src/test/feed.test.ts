@@ -30,5 +30,21 @@ test("httpError ignores a non-numeric Retry-After header", () => {
   const res = new Response("x", { status: 429, headers: { "retry-after": "Wed, 21 Oct 2026 07:28:00 GMT" } });
   const err = thrownError(() => httpError(res, "https://example.com/f"));
   expect(err.status).toBe(429);
-  expect(err.retryAfterMs).toBeUndefined();
+  expect(err.retryAfterMs).toBeGreaterThan(0);
+});
+
+test("httpError parses an HTTP-date Retry-After into a forward delay", () => {
+  const future = new Date(Date.now() + 90_000).toUTCString();
+  const res = new Response("x", { status: 503, headers: { "retry-after": future } });
+  const err = thrownError(() => httpError(res, "https://example.com/f"));
+  expect(err.status).toBe(503);
+  expect(err.retryAfterMs).toBeGreaterThan(80_000);
+  expect(err.retryAfterMs).toBeLessThan(100_000);
+});
+
+test("httpError ignores zero and empty Retry-After values", () => {
+  const zero = new Response("x", { status: 429, headers: { "retry-after": "0" } });
+  expect(thrownError(() => httpError(zero, "https://example.com/f")).retryAfterMs).toBeUndefined();
+  const empty = new Response("x", { status: 429, headers: { "retry-after": "" } });
+  expect(thrownError(() => httpError(empty, "https://example.com/f")).retryAfterMs).toBeUndefined();
 });
