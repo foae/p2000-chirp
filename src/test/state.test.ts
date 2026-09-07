@@ -62,3 +62,25 @@ test("corrupt state file warns and starts empty", () => {
   expect(store.existed).toBe(false);
   expect(store.lastSeenMessage("anything")).toBeUndefined();
 });
+
+test("a truncated message is a duplicate of a longer message delivered in the window", () => {
+  const store = new SeenStore(freshPath());
+  const t0 = 1_000_000;
+  store.markSeen("A2 Ambu 08123 DIA Groesbeek Rit 276252", "276252", t0);
+  expect(store.hasSeenExtension("A2 Ambu 08123", 3_600_000, t0 + 5_000)).toBe(true);
+  expect(store.hasSeenExtension("A2 Ambu 07118 Rit 275920", 3_600_000, t0 + 5_000)).toBe(false);
+});
+
+test("prefix dedupe is one-directional: a longer new message is never suppressed", () => {
+  const store = new SeenStore(freshPath());
+  const t0 = 1_000_000;
+  store.markSeen("A2 Ambu 08123", undefined, t0);
+  expect(store.hasSeenExtension("A2 Ambu 08123 DIA Groesbeek Rit 276252", 3_600_000, t0 + 5_000)).toBe(false);
+});
+
+test("prefix dedupe respects the window", () => {
+  const store = new SeenStore(freshPath());
+  const t0 = 1_000_000;
+  store.markSeen("A2 Ambu 08123 DIA Groesbeek Rit 276252", "276252", t0);
+  expect(store.hasSeenExtension("A2 Ambu 08123", 3_600_000, t0 + 3_600_001)).toBe(false);
+});

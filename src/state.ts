@@ -43,6 +43,15 @@ export class SeenStore {
     return this.sequences.get(seq);
   }
 
+  hasSeenExtension(message: string, windowMs: number, now: number = Date.now()): boolean {
+    const cutoff = now - windowMs;
+    for (const [seen, ts] of this.messages) {
+      if (ts < cutoff) continue;
+      if (seen.length > message.length && seen.startsWith(message)) return true;
+    }
+    return false;
+  }
+
   markSeen(message: string, seq: string | undefined, now: number = Date.now()): void {
     this.messages.set(message, now);
     if (seq) this.sequences.set(seq, now);
