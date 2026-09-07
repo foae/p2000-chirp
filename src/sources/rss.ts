@@ -1,4 +1,5 @@
 import type { P2000Item } from "../feed";
+import { httpError } from "../feed";
 import { parseWallAmsterdam } from "../tz";
 import { XMLParser } from "fast-xml-parser";
 
@@ -65,9 +66,7 @@ export async function fetchRss(url: string): Promise<P2000Item[]> {
     headers: { "User-Agent": "p2000-chirp/0.1 (personal P2000 notifier)" },
     signal: AbortSignal.timeout(10_000),
   });
-  if (!res.ok) {
-    throw new Error(`HTTP ${res.status} from ${url}`);
-  }
+  if (!res.ok) httpError(res, url);
   const xml = await res.text();
   const doc = parser.parse(xml) as Record<string, any>;
   const rawItems = doc?.rss?.channel?.item;

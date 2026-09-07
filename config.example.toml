@@ -3,7 +3,12 @@
 # live in .env, not here. config.toml is gitignored on purpose: keep your
 # personal areas/coordinates out of the repo.
 
-poll_interval_seconds = 10
+# Poll pacing: sources are polled this many seconds apart (staggered), so
+# each source is polled every max(15, this x number-of-sources) seconds —
+# e.g. 2 sources at 5s stagger = each source every 10s. Every poll gets a
+# random 1-3s jitter. Failing sources back off exponentially (capped at
+# 10 minutes) and 429 rate limits are honored via Retry-After.
+poll_interval_seconds = 5
 stale_after_minutes = 15
 # Dedupe state lives here; mount this path as a volume in Docker so
 # seen-items survive restarts.

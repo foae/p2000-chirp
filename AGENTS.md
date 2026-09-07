@@ -32,6 +32,7 @@ DRY_RUN=true` and the volume mounts from `docker-compose.yaml`.
 | `src/sources/rss.ts` | Berkel-Enschot RSS adapter |
 | `src/sources/p2000alarm.ts` | p2000alarm monitor-backend adapter |
 | `src/filter.ts` | Area (OR across axes) + discipline (AND) matching, discipline inference, message/sequence utils |
+| `src/schedule.ts` | Poll pacing math: per-source interval (stagger x N, 15s floor), 1-3s jitter, exponential backoff (10 min cap) |
 | `src/state.ts` | Persistent seen-store: message text → ts, trailing sequence → ts |
 | `src/tz.ts` | Europe/Amsterdam wall-clock → UTC parsing (DST-correct, null on garbage) |
 | `src/telegram.ts` | sendMessage call (timeout, 429 retry_after, token redaction) |

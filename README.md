@@ -78,7 +78,7 @@ TELEGRAM_CHAT_ID=123456789
 
 | Key | Meaning |
 |-----|---------|
-| `poll_interval_seconds` | Poll interval per cycle (min 5). |
+| `poll_interval_seconds` | Poll pacing: seconds between sources (staggered). Each source is polled every max(15, this × N-sources) seconds with 1–3 s random jitter; rate-limited sources back off. |
 | `stale_after_minutes` | One-time warning when the newest feed item gets older than this. |
 | `state_file` | Dedupe state (JSON); survives restarts; mount it in Docker. |
 | `prune_hours` | Seen-entries older than this are dropped. |
@@ -186,9 +186,11 @@ Adapters live in `src/sources/`; adding a feed type is one function returning
 
 ## Caveats
 
-- Both feeds are free third-party relays with no SLA. The daemon polls
-  through source failures (logging one-time warnings) and warns when the
-  feed goes stale.
+- Both feeds are free third-party relays with no SLA. Sources are polled on
+  staggered, jittered schedules (never in lockstep); failing sources back off
+  exponentially (capped at 10 minutes) and HTTP 429s are honored via
+  `Retry-After`, so the daemon stays a polite client even when a mirror is
+  struggling. The daemon warns when a feed goes stale.
 - Politie items often carry no region metadata; discipline is taken from the
   source's own classification when available (RSS `Dienst` field /
   p2000alarm record class) and otherwise inferred from the message prefix —

@@ -1,6 +1,7 @@
 import { loadConfig } from "./config";
 import { fetchItems, type P2000Item } from "./feed";
 import { inferDiscipline, matchesArea, matchesDiscipline, normalizeMessage, trailingSequence } from "./filter";
+import { backoffMs, jitterMs, perSourceIntervalMs } from "./schedule";
 import { SeenStore } from "./state";
 import { sendTelegram } from "./telegram";
 
@@ -28,9 +29,8 @@ if (!dryRun && (!token || !chatId)) {
 const store = new SeenStore(config.stateFile);
 const dedupeWindowMs = config.dedupeWindowSeconds * 1000;
 const pruneMs = config.pruneHours * 3_600_000;
-let bootstrapPending = !store.existed;
-const bootstrappedSources = new Set<string>();
-const bootstrapDeadline = Date.now() + 120_000;
+const staggerMs = config.pollIntervalSeconds * 1000;
+const intervalMs = perSourceIntervalMs(config.pollIntervalSeconds, config.sources.length);
 
 process.on("SIGTERM", () => {
   store.save();
@@ -51,6 +51,7 @@ function isDuplicate(item: P2000Item): boolean {
     const lastSeq = store.lastSeenSequence(seq);
     if (lastSeq !== undefined && now - lastSeq < dedupeWindowMs) return true;
   }
+  if (store.hasSeenExtension(message, dedupeWindowMs, now)) return true;
   return false;
 }
 
@@ -78,39 +79,12 @@ function sourceId(index: number): string {
   return `${config.sources[index].type}:${config.sources[index].url}`;
 }
 
-async function cycle(): Promise<void> {
-  const results = await Promise.allSettled(config.sources.map((s) => fetchItems(s)));
-  const items: P2000Item[] = [];
-  const perSource: string[] = [];
-  for (let i = 0; i < results.length; i++) {
-    const result = results[i];
-    if (result.status === "fulfilled") {
-      items.push(...result.value);
-      perSource.push(`${config.sources[i].type}=${result.value.length}`);
-      bootstrappedSources.add(sourceId(i));
-      if (failedSources.has(sourceId(i))) {
-        failedSources.delete(sourceId(i));
-        console.log(`[info] source recovered: ${config.sources[i].type}`);
-      }
-    } else if (!failedSources.has(sourceId(i))) {
-      failedSources.add(sourceId(i));
-      console.error(
-        `[error] ${config.sources[i].type} source failed: ${
-          result.reason instanceof Error ? result.reason.message : result.reason
-        }`,
-      );
+function trackNewestAndStale(items: P2000Item[]): void {
+  for (const item of items) {
+    if (!newestPubDate || item.pubDate.getTime() > newestPubDate.getTime()) {
+      newestPubDate = new Date(item.pubDate.getTime());
     }
   }
-
-  if (items.length > 0) {
-    items.sort((a, b) => a.pubDate.getTime() - b.pubDate.getTime());
-    for (const item of items) {
-      if (!newestPubDate || item.pubDate.getTime() > newestPubDate.getTime()) {
-        newestPubDate = new Date(item.pubDate.getTime());
-      }
-    }
-  }
-
   if (newestPubDate) {
     const ageMs = Date.now() - newestPubDate.getTime();
     if (ageMs > config.staleAfterMinutes * 60_000) {
@@ -122,37 +96,16 @@ async function cycle(): Promise<void> {
       staleWarned = false;
     }
   }
+}
 
-  if (bootstrapPending && items.length > 0) {
-    const allSampled = config.sources.every((_, i) => bootstrappedSources.has(sourceId(i)));
-    if (allSampled || Date.now() > bootstrapDeadline) {
-      bootstrapPending = false;
-      if (!allSampled) {
-        const missing = config.sources.filter((_, i) => !bootstrappedSources.has(sourceId(i))).map((s) => s.type);
-        console.warn(
-          `[warn] bootstrap completed before all sources were sampled (${missing.join(", ")} still failing) — its backlog may notify when it recovers`,
-        );
-      }
-      for (const item of items) {
-        store.markSeen(normalizeMessage(item.message), trailingSequence(normalizeMessage(item.message)));
-      }
-      store.save();
-      console.log(`[init] state file created — ${items.length} existing feed items marked seen without notifying`);
-      return;
-    }
-  }
-
-  if (items.length === 0) return;
-
+async function processItems(source: string, items: P2000Item[]): Promise<void> {
   const fresh = items.filter(
     (item) =>
       !isDuplicate(item) && matchesArea(item, config.filters) && matchesDiscipline(item, config.filters.disciplines),
   );
-
   if (debug) {
-    console.log(`[debug] cycle: ${perSource.join(", ")} | fresh+relevant=${fresh.length}`);
+    console.log(`[debug] poll ${source}: ${items.length} items, fresh+relevant=${fresh.length}`);
   }
-
   try {
     for (const item of fresh) {
       if (isDuplicate(item)) continue;
@@ -167,11 +120,70 @@ async function cycle(): Promise<void> {
       await Bun.sleep(300);
     }
   } catch (err) {
-    console.error(`[error] not delivered, will retry next cycle: ${err instanceof Error ? err.message : err}`);
+    console.error(`[error] not delivered, will retry next poll: ${err instanceof Error ? err.message : err}`);
   } finally {
     store.prune(pruneMs);
     store.save();
   }
+}
+
+interface SourceRuntime {
+  nextPollAt: number;
+  bootstrapped: boolean;
+  failures: number;
+}
+
+const runtimes: SourceRuntime[] = config.sources.map((_, i) => ({
+  nextPollAt: Date.now() + i * staggerMs + Math.floor(Math.random() * 1000),
+  bootstrapped: false,
+  failures: 0,
+}));
+
+async function pollSource(i: number): Promise<void> {
+  const rt = runtimes[i];
+  const source = config.sources[i];
+  const id = sourceId(i);
+  let items: P2000Item[];
+  try {
+    items = await fetchItems(source);
+  } catch (err) {
+    rt.failures++;
+    const retryAfterMs = (err as { retryAfterMs?: number } | null)?.retryAfterMs;
+    const status = (err as { status?: number } | null)?.status;
+    let waitMs: number;
+    if (retryAfterMs !== undefined) waitMs = retryAfterMs;
+    else if (status === 429) waitMs = 60_000;
+    else waitMs = backoffMs(intervalMs, rt.failures);
+    rt.nextPollAt = Date.now() + waitMs + jitterMs();
+    if (!failedSources.has(id)) {
+      failedSources.add(id);
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(
+        `[error] ${source.type} source failed: ${msg} — next attempt in ~${Math.round(waitMs / 1000)}s`,
+      );
+    }
+    return;
+  }
+  if (failedSources.has(id)) {
+    failedSources.delete(id);
+    console.log(`[info] source recovered: ${source.type}`);
+  }
+  rt.failures = 0;
+  rt.nextPollAt = Date.now() + intervalMs + jitterMs();
+  trackNewestAndStale(items);
+  if (!rt.bootstrapped) {
+    rt.bootstrapped = true;
+    for (const item of items) {
+      store.markSeen(normalizeMessage(item.message), trailingSequence(normalizeMessage(item.message)));
+    }
+    store.save();
+    console.log(
+      `[init] ${source.type} bootstrapped — ${items.length} existing feed items marked seen without notifying`,
+    );
+    return;
+  }
+  if (items.length === 0) return;
+  await processItems(source.type, items);
 }
 
 const f = config.filters;
@@ -182,15 +194,20 @@ if (f.disciplines.length === 0) {
   console.warn("[warn] no disciplines configured — all disciplines pass");
 }
 console.log(
-  `p2000-chirp: polling ${config.sources.length} source(s) every ${config.pollIntervalSeconds}s` +
+  `p2000-chirp: polling ${config.sources.length} source(s) ${config.pollIntervalSeconds}s apart` +
+    ` (each source every ${Math.round(intervalMs / 1000)}s + 1-3s jitter)` +
     ` (state: ${config.stateFile})${dryRun ? " [dry-run]" : ""}${debug ? " [debug]" : ""}`,
 );
 
 while (true) {
-  try {
-    await cycle();
-  } catch (err) {
-    console.error(`[error] cycle failed: ${err instanceof Error ? err.message : err}`);
+  const now = Date.now();
+  const due: number[] = [];
+  for (let i = 0; i < runtimes.length; i++) {
+    if (runtimes[i].nextPollAt <= now) due.push(i);
   }
-  await Bun.sleep(config.pollIntervalSeconds * 1000);
+  if (due.length > 0) {
+    await Promise.all(due.map((i) => pollSource(i)));
+  }
+  const nextAt = Math.min(...runtimes.map((rt) => rt.nextPollAt));
+  await Bun.sleep(Math.max(250, nextAt - Date.now()));
 }

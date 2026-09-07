@@ -1,4 +1,5 @@
 import type { P2000Item } from "../feed";
+import { httpError } from "../feed";
 import { parseWallAmsterdam } from "../tz";
 
 const DISCIPLINE_BY_CLASS: Record<string, string> = {
@@ -79,8 +80,6 @@ export async function fetchP2000Alarm(url: string): Promise<P2000Item[]> {
     headers: { Referer: new URL(url).origin + "/", "User-Agent": "p2000-chirp/0.1 (personal P2000 notifier)" },
     signal: AbortSignal.timeout(10_000),
   });
-  if (!res.ok) {
-    throw new Error(`HTTP ${res.status} from ${url}`);
-  }
+  if (!res.ok) httpError(res, url);
   return parseP2000AlarmText(await res.text());
 }

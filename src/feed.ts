@@ -20,6 +20,17 @@ export interface SourceConfig {
   url: string;
 }
 
+export function httpError(res: Response, url: string): never {
+  const err = new Error(`HTTP ${res.status} from ${url}`) as Error & { status: number; retryAfterMs?: number };
+  err.status = res.status;
+  const retryAfterHeader = res.headers.get("retry-after");
+  if (retryAfterHeader !== null) {
+    const retryAfter = Number(retryAfterHeader);
+    if (Number.isFinite(retryAfter) && retryAfter >= 0) err.retryAfterMs = retryAfter * 1000;
+  }
+  throw err;
+}
+
 export async function fetchItems(source: SourceConfig): Promise<P2000Item[]> {
   if (source.type === "rss") return fetchRss(source.url);
   if (source.type === "p2000alarm") return fetchP2000Alarm(source.url);

@@ -125,7 +125,7 @@ export function loadConfig(path: string): P2000Config {
     return Number.isFinite(v) ? Math.max(min, v) : def;
   };
   return {
-    pollIntervalSeconds: num("poll_interval_seconds", 10, 5),
+    pollIntervalSeconds: num("poll_interval_seconds", 5, 5),
     staleAfterMinutes: num("stale_after_minutes", 15, 1),
     stateFile:
       typeof obj.state_file === "string" && obj.state_file.trim() !== ""
