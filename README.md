@@ -57,8 +57,9 @@ docker compose up -d
 ```
 
 State (the dedupe memory) lives under `/app/state`; mount it as a volume and
-restarts/rebuilds won't re-notify old incidents. `DRY_RUN=true` and
-`DEBUG=true` environment variables mirror the CLI flags.
+restarts/rebuilds won't re-notify old incidents. The container runs as the
+non-root `bun` user. `DRY_RUN=true` and `DEBUG=true` environment variables
+mirror the CLI flags.
 
 ## Configuration
 
@@ -77,7 +78,7 @@ TELEGRAM_CHAT_ID=123456789
 | `stale_after_minutes` | One-time warning when the newest feed item gets older than this. |
 | `state_file` | Dedupe state (JSON); survives restarts; mount it in Docker. |
 | `prune_hours` | Seen-entries older than this are dropped. |
-| `dedupe_window_seconds` | Window for duplicate suppression — see below. |
+| `dedupe_window_seconds` | Duplicate-suppression window (default 3600, min 60). Keep it larger than how long feeds retain old items (~15–25 min) — see below. |
 | `[[sources]]` | Feed list: `type` = `rss` or `p2000alarm`, plus `url`. |
 
 ### Area filters
@@ -139,7 +140,8 @@ km = 1.5
 ```
 
 `disciplines = ["Brandweer", "Ambulance", "Politie"]` is a hard AND filter on
-top of the area filter (add `"KNRM"` if you're coastal); short forms work.
+top of the area filter (add `"KNRM"` if you're coastal); short forms work and
+typos are rejected at startup.
 
 ## How dedupe works
 
@@ -150,13 +152,15 @@ independently, and POCSAG radio transmissions occasionally arrive corrupted
 suppressed when either:
 
 1. the exact message text was already delivered within
-   `dedupe_window_seconds` (default 300), or
+   `dedupe_window_seconds` (default 3600), or
 2. the message's trailing sequence number (`bon 138437`, `Rit 134293` style
    counters most P2000 messages end with) was already delivered within the
    same window — this catches corrupted retransmissions.
 
 The window, not timestamps, drives dedupe: mirrors stamp times differently,
-so text is the only reliable identity. Side effect: a genuinely recurring
+so text is the only reliable identity. The window must exceed how long the
+feeds retain old items (~15–25 min); a genuinely new dispatch still passes
+because its trailing sequence number differs. Side effect: a recurring
 identical status message (e.g. `Einde vws`) notifies at most once per window.
 
 ## Feed landscape (surveyed 2026-09)
@@ -181,9 +185,12 @@ Adapters live in `src/sources/`; adding a feed type is one function returning
 - Both feeds are free third-party relays with no SLA. The daemon polls
   through source failures (logging one-time warnings) and warns when the
   feed goes stale.
-- Politie items often carry no region metadata; discipline is inferred from
-  the message prefix, and region-less items still match via
-  postcodes/keywords/radius.
+- Politie items often carry no region metadata; discipline is taken from the
+  source's own classification when available (RSS `Dienst` field /
+  p2000alarm record class) and otherwise inferred from the message prefix —
+  `A1/A2` and `B1/B2` are ambulance priorities (B = geen-spoed rit), `P 1`/
+  `P 2` are brandweer priority alerts, politie messages carry no letter
+  prefix. Region-less items still match via postcodes/keywords/radius.
 - P2000 is the paging layer — it does not represent every incident or police
   operation.
 - Messages contain incident addresses (and, for ambulances,
@@ -194,6 +201,7 @@ Adapters live in `src/sources/`; adding a feed type is one function returning
 
 ```bash
 bunx tsc --noEmit                       # typecheck
+bun test                                # unit tests (tz/DST, parsers, filters, config, state)
 bun start --dry-run --debug --config config.toml
 ```
 

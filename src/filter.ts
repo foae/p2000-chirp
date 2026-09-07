@@ -3,19 +3,27 @@ import type { AreaFilters } from "./config";
 
 export type Discipline = "Brandweer" | "Ambulance" | "Politie" | "KNRM" | "Onbekend";
 
+export function normalizeMessage(message: string): string {
+  return message.replace(/\s+/g, " ").trim();
+}
+
+export function trailingSequence(message: string): string | undefined {
+  const m = message.match(/(\d{5,})\s*$/);
+  return m ? m[1] : undefined;
+}
+
 export function inferDiscipline(item: P2000Item): Discipline {
-  const m = item.message.match(/^\s*([ABP])\s?\d/i);
-  if (m) {
-    if (m[1].toUpperCase() === "A") return "Ambulance";
-    if (m[1].toUpperCase() === "B") return "Brandweer";
-    return "Politie";
-  }
-  const dienst = item.dienst.toLowerCase();
+  const dienst = item.dienst.trim().toLowerCase();
   if (dienst.startsWith("brandweer")) return "Brandweer";
   if (dienst.startsWith("ambulance")) return "Ambulance";
   if (dienst.startsWith("politie")) return "Politie";
   if (dienst.startsWith("knrm")) return "KNRM";
-  return "Onbekend";
+  if (dienst !== "" && dienst !== "gereserveerd") return "Onbekend";
+  const m = item.message.match(/^\s*([ABPN])\s?\d/i);
+  if (!m) return "Onbekend";
+  if (m[1].toUpperCase() === "A" || m[1].toUpperCase() === "B") return "Ambulance";
+  if (m[1].toUpperCase() === "P") return "Brandweer";
+  return "KNRM";
 }
 
 export function matchesDiscipline(item: P2000Item, disciplines: string[]): boolean {

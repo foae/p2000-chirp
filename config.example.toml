@@ -11,8 +11,11 @@ state_file = "state/state.json"
 prune_hours = 24
 # An item is a duplicate if the same message text (or its trailing sequence
 # number) was already delivered within this window — this is what makes one
-# incident = one notification even across multiple sources.
-dedupe_window_seconds = 300
+# incident = one notification even across multiple sources. Keep this LARGER
+# than how long a feed retains old items (~15-25 min for these sources);
+# genuinely new dispatches differ in their trailing bon/rit/sequence number
+# and still pass.
+dedupe_window_seconds = 3600
 
 [[sources]]
 type = "rss"

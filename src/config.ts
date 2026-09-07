@@ -26,10 +26,36 @@ export interface P2000Config {
 }
 
 const SOURCE_TYPES: SourceType[] = ["rss", "p2000alarm"];
+const KNOWN_DISCIPLINES = ["brandweer", "ambulance", "politie", "knrm"];
 
-function stringList(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  return value.filter((v): v is string => typeof v === "string" && v.trim() !== "");
+function filterList(value: unknown, key: string): string[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) {
+    throw new Error(`filters.${key} must be an array of strings (got ${typeof value})`);
+  }
+  return value.map((entry) => {
+    if (typeof entry !== "string" || entry.trim() === "") {
+      throw new Error(`filters.${key} entries must be non-empty strings — quote them (postcodes = ["3511"], not [3511])`);
+    }
+    return entry;
+  });
+}
+
+function parseRadius(raw: unknown): RadiusFilter | null {
+  if (!raw || typeof raw !== "object") return null;
+  const obj = raw as Record<string, unknown>;
+  const hasAny = obj.lat !== undefined || obj.lon !== undefined || obj.km !== undefined;
+  if (!hasAny) return null;
+  const lat = Number(obj.lat);
+  const lon = Number(obj.lon);
+  const km = Number(obj.km);
+  if (
+    !Number.isFinite(lat) || !Number.isFinite(lon) || !Number.isFinite(km) || km <= 0 ||
+    lat < -90 || lat > 90 || lon < -180 || lon > 180
+  ) {
+    throw new Error(`filters.radius requires numeric "lat" (-90..90), "lon" (-180..180) and "km" > 0`);
+  }
+  return { lat, lon, km };
 }
 
 function parseSources(value: unknown, configPath: string): SourceConfig[] {
@@ -41,11 +67,23 @@ function parseSources(value: unknown, configPath: string): SourceConfig[] {
       throw new Error(`sources[${i}] must be a table`);
     }
     const obj = entry as Record<string, unknown>;
-    const url = typeof obj.url === "string" ? obj.url.trim() : "";
-    const type = typeof obj.type === "string" ? (obj.type.trim() as SourceType) : "rss";
-    if (url === "") throw new Error(`sources[${i}] requires a "url" string`);
+    const type = typeof obj.type === "string" ? (obj.type.trim() as SourceType) : "";
+    if (type === "") {
+      throw new Error(`sources[${i}] requires a "type" ("rss" or "p2000alarm")`);
+    }
     if (!SOURCE_TYPES.includes(type)) {
       throw new Error(`sources[${i}] has unknown type "${type}" (expected one of ${SOURCE_TYPES.join(", ")})`);
+    }
+    const url = typeof obj.url === "string" ? obj.url.trim() : "";
+    if (url === "") throw new Error(`sources[${i}] requires a "url" string`);
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      throw new Error(`sources[${i}] url "${url}" is not a valid URL`);
+    }
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      throw new Error(`sources[${i}] url must be http(s)`);
     }
     return { type, url };
   });
@@ -66,24 +104,21 @@ export function loadConfig(path: string): P2000Config {
   }
   const obj = raw ?? {};
   const filtersRaw = (obj.filters ?? {}) as Record<string, unknown>;
-  const radiusRaw = (filtersRaw.radius ?? null) as Record<string, unknown> | null;
-  let radius: RadiusFilter | null = null;
-  if (radiusRaw && typeof radiusRaw === "object") {
-    const lat = Number(radiusRaw.lat);
-    const lon = Number(radiusRaw.lon);
-    const km = Number(radiusRaw.km);
-    if (Number.isFinite(lat) && Number.isFinite(lon) && Number.isFinite(km) && km > 0) {
-      radius = { lat, lon, km };
-    } else {
-      throw new Error(`filters.radius requires numeric "lat", "lon" and "km" > 0`);
+  const disciplines = filterList(filtersRaw.disciplines, "disciplines");
+  for (const configured of disciplines) {
+    const normalized = configured.trim().toLowerCase();
+    if (!KNOWN_DISCIPLINES.some((known) => known.startsWith(normalized))) {
+      throw new Error(
+        `filters.disciplines entry "${configured}" is not a known discipline or prefix (known: Brandweer, Ambulance, Politie, KNRM)`,
+      );
     }
   }
   const filters: AreaFilters = {
-    regions: stringList(filtersRaw.regions),
-    postcodes: stringList(filtersRaw.postcodes),
-    keywords: stringList(filtersRaw.keywords),
-    disciplines: stringList(filtersRaw.disciplines),
-    radius,
+    regions: filterList(filtersRaw.regions, "regions"),
+    postcodes: filterList(filtersRaw.postcodes, "postcodes"),
+    keywords: filterList(filtersRaw.keywords, "keywords"),
+    disciplines,
+    radius: parseRadius(filtersRaw.radius),
   };
   const num = (key: string, def: number, min: number): number => {
     const v = Number(obj[key]);
@@ -97,7 +132,7 @@ export function loadConfig(path: string): P2000Config {
         ? obj.state_file.trim()
         : "state/state.json",
     pruneHours: num("prune_hours", 24, 1),
-    dedupeWindowSeconds: num("dedupe_window_seconds", 300, 0),
+    dedupeWindowSeconds: num("dedupe_window_seconds", 3600, 60),
     sources: parseSources(obj.sources, path),
     filters,
   };

@@ -1,6 +1,6 @@
 import { loadConfig } from "./config";
 import { fetchItems, type P2000Item } from "./feed";
-import { inferDiscipline, matchesArea, matchesDiscipline } from "./filter";
+import { inferDiscipline, matchesArea, matchesDiscipline, normalizeMessage, trailingSequence } from "./filter";
 import { SeenStore } from "./state";
 import { sendTelegram } from "./telegram";
 
@@ -8,7 +8,14 @@ const args = process.argv.slice(2);
 const dryRun = args.includes("--dry-run") || process.env.DRY_RUN === "true";
 const debug = args.includes("--debug") || process.env.DEBUG === "true";
 const configFlagIdx = args.indexOf("--config");
-const configPath = configFlagIdx >= 0 ? args[configFlagIdx + 1] : "config.toml";
+let configPath = "config.toml";
+if (configFlagIdx >= 0) {
+  configPath = args[configFlagIdx + 1] ?? "";
+  if (configPath === "") {
+    console.error("--config requires a file path argument");
+    process.exit(1);
+  }
+}
 
 const config = loadConfig(configPath);
 const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -22,15 +29,17 @@ const store = new SeenStore(config.stateFile);
 const dedupeWindowMs = config.dedupeWindowSeconds * 1000;
 const pruneMs = config.pruneHours * 3_600_000;
 let bootstrapPending = !store.existed;
+const bootstrappedSources = new Set<string>();
+const bootstrapDeadline = Date.now() + 120_000;
 
-function normalizeMessage(message: string): string {
-  return message.replace(/\s+/g, " ").trim();
-}
-
-function trailingSequence(message: string): string | undefined {
-  const m = message.match(/(\d{4,})\s*$/);
-  return m ? m[1] : undefined;
-}
+process.on("SIGTERM", () => {
+  store.save();
+  process.exit(0);
+});
+process.on("SIGINT", () => {
+  store.save();
+  process.exit(0);
+});
 
 function isDuplicate(item: P2000Item): boolean {
   const now = Date.now();
@@ -47,7 +56,7 @@ function isDuplicate(item: P2000Item): boolean {
 
 function format(item: P2000Item): string {
   const discipline = inferDiscipline(item);
-  const prio = item.message.match(/^\s*([ABP])\s?([12])/i);
+  const prio = item.message.match(/^\s*([ABPN])\s?([12])/i);
   const prioText = prio ? `${prio[1].toUpperCase()}${prio[2]}` : "";
   const time = item.pubDate.toLocaleTimeString("nl-NL", {
     timeZone: "Europe/Amsterdam",
@@ -65,41 +74,31 @@ let newestPubDate: Date | null = null;
 let staleWarned = false;
 const failedSources = new Set<string>();
 
+function sourceId(index: number): string {
+  return `${config.sources[index].type}:${config.sources[index].url}`;
+}
+
 async function cycle(): Promise<void> {
   const results = await Promise.allSettled(config.sources.map((s) => fetchItems(s)));
   const items: P2000Item[] = [];
   const perSource: string[] = [];
   for (let i = 0; i < results.length; i++) {
-    const source = config.sources[i];
-    const sourceId = `${source.type}:${source.url}`;
     const result = results[i];
     if (result.status === "fulfilled") {
       items.push(...result.value);
-      perSource.push(`${source.type}=${result.value.length}`);
-      if (failedSources.has(sourceId)) {
-        failedSources.delete(sourceId);
-        console.log(`[info] source recovered: ${source.type}`);
+      perSource.push(`${config.sources[i].type}=${result.value.length}`);
+      bootstrappedSources.add(sourceId(i));
+      if (failedSources.has(sourceId(i))) {
+        failedSources.delete(sourceId(i));
+        console.log(`[info] source recovered: ${config.sources[i].type}`);
       }
-    } else {
-      if (!failedSources.has(sourceId)) {
-        failedSources.add(sourceId);
-        console.error(
-          `[error] ${source.type} source failed: ${
-            result.reason instanceof Error ? result.reason.message : result.reason
-          }`,
-        );
-      }
-    }
-  }
-  if (newestPubDate) {
-    const ageMs = Date.now() - newestPubDate.getTime();
-    if (ageMs > config.staleAfterMinutes * 60_000) {
-      if (!staleWarned) {
-        staleWarned = true;
-        console.warn(`[warn] feed looks stale: newest item is ${Math.round(ageMs / 60_000)} minutes old`);
-      }
-    } else {
-      staleWarned = false;
+    } else if (!failedSources.has(sourceId(i))) {
+      failedSources.add(sourceId(i));
+      console.error(
+        `[error] ${config.sources[i].type} source failed: ${
+          result.reason instanceof Error ? result.reason.message : result.reason
+        }`,
+      );
     }
   }
 
@@ -112,12 +111,35 @@ async function cycle(): Promise<void> {
     }
   }
 
-  if (items.length > 0 && bootstrapPending) {
-    bootstrapPending = false;
-    for (const item of items) store.markSeen(normalizeMessage(item.message), trailingSequence(item.message));
-    store.save();
-    console.log(`[init] state file created — ${items.length} existing feed items marked seen without notifying`);
-    return;
+  if (newestPubDate) {
+    const ageMs = Date.now() - newestPubDate.getTime();
+    if (ageMs > config.staleAfterMinutes * 60_000) {
+      if (!staleWarned) {
+        staleWarned = true;
+        console.warn(`[warn] feed looks stale: newest item is ${Math.round(ageMs / 60_000)} minutes old`);
+      }
+    } else {
+      staleWarned = false;
+    }
+  }
+
+  if (bootstrapPending && items.length > 0) {
+    const allSampled = config.sources.every((_, i) => bootstrappedSources.has(sourceId(i)));
+    if (allSampled || Date.now() > bootstrapDeadline) {
+      bootstrapPending = false;
+      if (!allSampled) {
+        const missing = config.sources.filter((_, i) => !bootstrappedSources.has(sourceId(i))).map((s) => s.type);
+        console.warn(
+          `[warn] bootstrap completed before all sources were sampled (${missing.join(", ")} still failing) — its backlog may notify when it recovers`,
+        );
+      }
+      for (const item of items) {
+        store.markSeen(normalizeMessage(item.message), trailingSequence(normalizeMessage(item.message)));
+      }
+      store.save();
+      console.log(`[init] state file created — ${items.length} existing feed items marked seen without notifying`);
+      return;
+    }
   }
 
   if (items.length === 0) return;
@@ -131,26 +153,25 @@ async function cycle(): Promise<void> {
     console.log(`[debug] cycle: ${perSource.join(", ")} | fresh+relevant=${fresh.length}`);
   }
 
-  for (const item of fresh) {
-    if (isDuplicate(item)) continue;
-    const text = format(item);
-    try {
+  try {
+    for (const item of fresh) {
+      if (isDuplicate(item)) continue;
+      const text = format(item);
       if (!dryRun) await sendTelegram(token!, chatId!, text);
-      store.markSeen(normalizeMessage(item.message), trailingSequence(item.message));
+      store.markSeen(normalizeMessage(item.message), trailingSequence(normalizeMessage(item.message)));
       console.log(
         dryRun
           ? `[dry-run] (${item.source}) ${text.replace(/\n/g, " | ")}`
           : `[sent] (${item.source}) ${text.replace(/\n/g, " | ")}`,
       );
-    } catch (err) {
-      console.error(`[error] not delivered, will retry next cycle: ${err instanceof Error ? err.message : err}`);
-      break;
+      await Bun.sleep(300);
     }
-    await Bun.sleep(300);
+  } catch (err) {
+    console.error(`[error] not delivered, will retry next cycle: ${err instanceof Error ? err.message : err}`);
+  } finally {
+    store.prune(pruneMs);
+    store.save();
   }
-
-  store.prune(pruneMs);
-  store.save();
 }
 
 const f = config.filters;

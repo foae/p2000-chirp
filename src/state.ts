@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync, unlinkSync } from "node:fs";
 import { dirname } from "node:path";
 
 interface StateShape {
@@ -9,6 +9,7 @@ interface StateShape {
 export class SeenStore {
   private messages = new Map<string, number>();
   private sequences = new Map<string, number>();
+  private dirty = false;
   existed: boolean;
 
   constructor(private readonly path: string) {
@@ -28,6 +29,9 @@ export class SeenStore {
       }
     } catch {
       this.existed = false;
+      console.warn(
+        `[warn] state file "${path}" is corrupt or unreadable — starting with empty dedupe state (a fresh bootstrap will run)`,
+      );
     }
   }
 
@@ -39,14 +43,14 @@ export class SeenStore {
     return this.sequences.get(seq);
   }
 
-  markSeen(message: string, seq?: string): void {
-    const now = Date.now();
+  markSeen(message: string, seq: string | undefined, now: number = Date.now()): void {
     this.messages.set(message, now);
     if (seq) this.sequences.set(seq, now);
+    this.dirty = true;
   }
 
-  prune(pruneMs: number): number {
-    const cutoff = Date.now() - pruneMs;
+  prune(pruneMs: number, now: number = Date.now()): number {
+    const cutoff = now - pruneMs;
     let removed = 0;
     for (const [key, ts] of this.messages) {
       if (ts < cutoff) {
@@ -60,20 +64,26 @@ export class SeenStore {
         removed++;
       }
     }
+    if (removed > 0) this.dirty = true;
     return removed;
   }
 
   save(): void {
+    if (!this.dirty) return;
     const state: StateShape = {
       messages: Object.fromEntries(this.messages),
       sequences: Object.fromEntries(this.sequences),
     };
     const dir = dirname(this.path);
     if (dir !== "" && dir !== ".") mkdirSync(dir, { recursive: true });
-    writeFileSync(this.path, JSON.stringify(state));
-  }
-
-  get size(): number {
-    return this.messages.size;
+    const tmp = `${this.path}.tmp`;
+    writeFileSync(tmp, JSON.stringify(state));
+    try {
+      renameSync(tmp, this.path);
+    } catch (err) {
+      unlinkSync(tmp);
+      throw err;
+    }
+    this.dirty = false;
   }
 }
