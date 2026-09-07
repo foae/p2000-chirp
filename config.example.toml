@@ -1,0 +1,45 @@
+# p2000-chirp configuration
+# Copy to config.toml and edit. Secrets (TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
+# live in .env, not here. config.toml is gitignored on purpose: keep your
+# personal areas/coordinates out of the repo.
+
+poll_interval_seconds = 10
+stale_after_minutes = 15
+# Dedupe state lives here; mount this path as a volume in Docker so
+# seen-items survive restarts.
+state_file = "state/state.json"
+prune_hours = 24
+# An item is a duplicate if the same message text (or its trailing sequence
+# number) was already delivered within this window — this is what makes one
+# incident = one notification even across multiple sources.
+dedupe_window_seconds = 300
+
+[[sources]]
+type = "rss"
+url = "https://p2000.brandweer-berkel-enschot.nl/homeassistant/rss.asp"
+
+[[sources]]
+type = "p2000alarm"
+url = "https://monitor.p2000alarm.nl/ReadMonitor.php"
+
+[filters]
+# Independent OR triggers: an item passes if ANY configured axis matches.
+# Leave a list empty to disable that axis. All empty = everything passes.
+regions = []
+# Postcode digit prefixes matched against "1234AB" postcodes in message text,
+# e.g. "3511" for one postcode area, "351" for 3511-3519.
+postcodes = []
+# Substrings matched against message text, e.g. street or place names.
+keywords = []
+# Hard filter (AND with area). Items with unknown discipline are dropped.
+# Short forms work: "Brandweer" matches "Brandweerdiensten".
+disciplines = ["Brandweer", "Ambulance", "Politie"]
+
+# Optional radius axis: notify when an item carries coordinates within
+# `km` of lat/lon (only the RSS source provides coordinates; items without
+# them rely on the axes above). Find your lat/lon by right-clicking in
+# Google Maps / OpenStreetMap.
+[filters.radius]
+# lat = 52.0907
+# lon = 5.1214
+# km = 1.5

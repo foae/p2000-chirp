@@ -1,0 +1,14 @@
+services:
+  p2000-chirp:
+    build: .
+    image: p2000-chirp
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      # Your personal filters — never commit this file.
+      - ./config.toml:/app/config.toml:ro
+      # Dedupe state — survives restarts and rebuilds.
+      - p2000-state:/app/state
+
+volumes:
+  p2000-state:
