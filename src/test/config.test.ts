@@ -34,7 +34,7 @@ test("partial radius throws with a clear message", () => {
 
 test("out-of-range radius throws", () => {
   const path = withConfig(
-    '[[sources]]\ntype = "rss"\nurl = "https://example.com/f"\n[filters.radius]\nlat = 95\nlon = 5\km = 1\n',
+    '[[sources]]\ntype = "rss"\nurl = "https://example.com/f"\n[filters.radius]\nlat = 95\nlon = 5\nkm = 1\n',
   );
   expect(() => loadConfig(path)).toThrow(/filters\.radius requires/);
 });
