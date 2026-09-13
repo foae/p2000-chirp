@@ -73,6 +73,16 @@ test("normalizeMessage collapses whitespace", () => {
 const noFilters = { regions: [], postcodes: [], keywords: [], disciplines: [], radius: null };
 const dom = { lat: 52.0907, lon: 5.1214, km: 1.5 };
 
+test("postcode area includes full postcodes and bare dispatch postcodes", () => {
+  const filters = { ...noFilters, postcodes: ["3511"] };
+  for (const postcode of ["3511AB", "3511 ZZ", "3511bg", "3511"]) {
+    expect(matchesArea(item({ message: `B2 13205 Voorbeeldstraat ${postcode} Utrecht 88704` }), filters)).toBe(true);
+  }
+  for (const postcode of ["3512AB", "13511", "35110", "X3511", "3511ABC"]) {
+    expect(matchesArea(item({ message: `B2 13205 Voorbeeldstraat ${postcode} Utrecht 88704` }), filters)).toBe(false);
+  }
+});
+
 test("area axes OR together; empty lists pass everything", () => {
   expect(matchesArea(item({ message: "anything" }), noFilters)).toBe(true);
   expect(matchesArea(item({ message: "Kleiweg 3045PM", regName: "Rotterdam" }), { ...noFilters, postcodes: ["304"] })).toBe(true);

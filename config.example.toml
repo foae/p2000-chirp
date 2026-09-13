@@ -35,8 +35,9 @@ url = "https://monitor.p2000alarm.nl/ReadMonitor.php"
 # Independent OR triggers: an item passes if ANY configured axis matches.
 # Leave a list empty to disable that axis. All empty = everything passes.
 regions = []
-# Postcode digit prefixes matched against "1234AB" postcodes in message text,
-# e.g. "3511" for one postcode area, "351" for 3511-3519.
+# Postcode digit prefixes matched against "3511AB", "3511 AB", or bare "3511"
+# in message text. "3511" covers every letter suffix; "351" covers 3510-3519.
+# Bare four-digit numbers can also match unrelated numbers in dispatch text.
 postcodes = []
 # Substrings matched against message text, e.g. street or place names.
 keywords = []

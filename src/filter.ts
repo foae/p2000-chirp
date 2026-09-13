@@ -38,7 +38,7 @@ function normalizeRegion(value: string): string {
 }
 
 export function extractPostcodes(message: string): string[] {
-  const re = /\b(\d{4})\s?[A-Za-z]{2}\b/g;
+  const re = /\b(\d{4})(?:\s?[A-Za-z]{2})?\b/g;
   const out: string[] = [];
   let m: RegExpExecArray | null;
   while ((m = re.exec(message)) !== null) out.push(m[1]);

@@ -103,7 +103,7 @@ Recipes, narrow to broad (Utrecht examples — swap in your own):
 # One postcode area (3511 = Utrecht centre)
 postcodes = ["3511"]
 
-# Wider: a 3-digit prefix covers 3511–3519
+# Wider: a 3-digit prefix covers 3510–3519
 postcodes = ["351"]
 
 # Multiple areas of interest — just list them
@@ -121,9 +121,11 @@ km = 1.5
 
 Trade-offs:
 
-- **Postcodes** match only when the message text contains a `####XX` postcode
-  — many messages don't (e.g.
-  `P 2 BDH-02 BR container (Ondergronds) Brueghelstraat 's-Gravenhage`).
+- **Postcodes** match digit prefixes in full (`3511AB`, `3511 AB`) or bare
+  four-digit (`3511`) postcodes in message text. A `3511` filter includes
+  every letter suffix in that area. Bare four-digit numbers are ambiguous:
+  an unrelated number equal to your postcode can also match.
+  Messages without a postcode still need another area axis to match.
 - **Radius** matches items that carry coordinates — only the RSS source
   provides them (~75 % of its items). Items without coordinates fall through
   to the other axes.
