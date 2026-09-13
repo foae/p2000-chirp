@@ -38,7 +38,7 @@ function normalizeRegion(value: string): string {
 }
 
 export function extractPostcodes(message: string): string[] {
-  const re = /\b(\d{4})(?:\s?[A-Za-z]{2})?\b/g;
+  const re = /(?<![\p{L}\p{M}\p{N}_])(\d{4})(?:\s?[A-Za-z]{2})?(?![\p{L}\p{M}\p{N}_])/gu;
   const out: string[] = [];
   let m: RegExpExecArray | null;
   while ((m = re.exec(message)) !== null) out.push(m[1]);
@@ -63,9 +63,12 @@ export function matchesArea(item: P2000Item, filters: AreaFilters): boolean {
     if (normalizeRegion(item.regName).includes(normalizeRegion(region))) return true;
   }
   const message = item.message;
-  for (const prefix of postcodes) {
-    const digits = prefix.replace(/\D/g, "");
-    if (digits !== "" && extractPostcodes(message).some((found) => found.startsWith(digits))) return true;
+  if (postcodes.length > 0) {
+    const foundPostcodes = extractPostcodes(message);
+    for (const prefix of postcodes) {
+      const digits = prefix.replace(/\D/g, "");
+      if (digits !== "" && foundPostcodes.some((found) => found.startsWith(digits))) return true;
+    }
   }
   for (const keyword of keywords) {
     if (message.toLowerCase().includes(keyword.toLowerCase())) return true;

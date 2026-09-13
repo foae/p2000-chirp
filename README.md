@@ -125,6 +125,8 @@ Trade-offs:
   four-digit (`3511`) postcodes in message text. A `3511` filter includes
   every letter suffix in that area. Bare four-digit numbers are ambiguous:
   an unrelated number equal to your postcode can also match.
+  Codes embedded in longer letter/digit tokens (including Unicode letters)
+  or underscore-delimited identifiers do not match.
   Messages without a postcode still need another area axis to match.
 - **Radius** matches items that carry coordinates — only the RSS source
   provides them (~75 % of its items). Items without coordinates fall through

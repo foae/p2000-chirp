@@ -73,14 +73,62 @@ test("normalizeMessage collapses whitespace", () => {
 const noFilters = { regions: [], postcodes: [], keywords: [], disciplines: [], radius: null };
 const dom = { lat: 52.0907, lon: 5.1214, km: 1.5 };
 
-test("postcode area includes full postcodes and bare dispatch postcodes", () => {
-  const filters = { ...noFilters, postcodes: ["3511"] };
-  for (const postcode of ["3511AB", "3511 ZZ", "3511bg", "3511"]) {
+test.each(["3511AB", "3511 ZZ", "3511bg", "3511"])(
+  "postcode area matches dispatch postcode %s",
+  (postcode) => {
+    const filters = { ...noFilters, postcodes: ["3511"] };
     expect(matchesArea(item({ message: `B2 13205 Voorbeeldstraat ${postcode} Utrecht 88704` }), filters)).toBe(true);
-  }
-  for (const postcode of ["3512AB", "13511", "35110", "X3511", "3511ABC"]) {
+  },
+);
+
+test.each(["3512AB", "13511", "35110", "X3511", "3511ABC", "3511A", "351", ""])(
+  "postcode area rejects unrelated or malformed token %j",
+  (postcode) => {
+    const filters = { ...noFilters, postcodes: ["3511"] };
     expect(matchesArea(item({ message: `B2 13205 Voorbeeldstraat ${postcode} Utrecht 88704` }), filters)).toBe(false);
-  }
+  },
+);
+
+test("postcode extraction handles bare codes at message boundaries and punctuation", () => {
+  expect(extractPostcodes("3511")).toEqual(["3511"]);
+  expect(extractPostcodes("(3511), 3521AB; 3531 CD")).toEqual(["3511", "3521", "3531"]);
+  expect(extractPostcodes("B2 13205 Voorbeeldstraat Utrecht 3511")).toEqual(["3511"]);
+});
+
+test.each(["é3511", "3511é", "3511ABé", "١3511", "3511\u0301", "_3511"])(
+  "postcode extraction rejects codes embedded in Unicode or identifier tokens %s",
+  (message) => {
+    expect(extractPostcodes(message)).toEqual([]);
+  },
+);
+
+test("configured full postcode still selects the entire four-digit area", () => {
+  const filters = { ...noFilters, postcodes: ["3511AB"] };
+  expect(matchesArea(item({ message: "3511 ZZ" }), filters)).toBe(true);
+  expect(matchesArea(item({ message: "3511" }), filters)).toBe(true);
+  expect(matchesArea(item({ message: "3512AB" }), filters)).toBe(false);
+});
+
+test("postcode matching checks every extracted code and configured area", () => {
+  const filters = { ...noFilters, postcodes: ["3521", "3531"] };
+  expect(matchesArea(item({ message: "Van 3511AB naar 3531" }), filters)).toBe(true);
+  expect(matchesArea(item({ message: "Van 3511 naar 3541AB" }), filters)).toBe(false);
+});
+
+test("three-digit prefixes include both ends of the postcode range", () => {
+  const filters = { ...noFilters, postcodes: ["351"] };
+  expect(matchesArea(item({ message: "3510AB" }), filters)).toBe(true);
+  expect(matchesArea(item({ message: "3519" }), filters)).toBe(true);
+  expect(matchesArea(item({ message: "3509AB" }), filters)).toBe(false);
+  expect(matchesArea(item({ message: "3520" }), filters)).toBe(false);
+});
+
+test("matching a bare postcode does not bypass the discipline filter", () => {
+  const filters = { ...noFilters, postcodes: ["3511"], disciplines: ["Brandweer"] };
+  const dispatch = item({ message: "B2 13205 Voorbeeldstraat 3511 Utrecht 88704" });
+  expect(matchesArea(dispatch, filters)).toBe(true);
+  expect(matchesDiscipline(dispatch, filters.disciplines)).toBe(false);
+  expect(matchesDiscipline(dispatch, ["Ambulance"])).toBe(true);
 });
 
 test("area axes OR together; empty lists pass everything", () => {
