@@ -18,6 +18,14 @@ test("markSeen records message and sequence with injected clock", () => {
   expect(store.lastSeenSequence("999999")).toBeUndefined();
 });
 
+test("mixed-case cross-source messages dedupe exactly and by truncated prefix", () => {
+  const store = new SeenStore(freshPath());
+  const t0 = 1_000_000;
+  store.markSeen("A2 AMBU 08123 DIA GROESBEEK", undefined, t0);
+  expect(store.lastSeenMessage("a2 ambu 08123 dia groesbeek")).toBe(t0);
+  expect(store.hasSeenExtension("a2 ambu 08123", 3_600_000, t0 + 5_000)).toBe(true);
+});
+
 test("markSeen refresh overrides earlier timestamp", () => {
   const store = new SeenStore(freshPath());
   store.markSeen("msg", undefined, 1_000);
@@ -46,6 +54,37 @@ test("save persists and reloads atomically", () => {
   const reloaded = new SeenStore(path);
   expect(reloaded.existed).toBe(true);
   expect(reloaded.lastSeenMessage("m")).toBe(5);
+});
+
+test("loading legacy mixed-case message keys merges newest timestamp and migrates state", () => {
+  const path = freshPath();
+  writeFileSync(
+    path,
+    JSON.stringify({
+      messages: {
+        "A2 AMBU 08123": 100,
+        "a2 ambu 08123": 200,
+        " A2  AMBU 08123 ": 150,
+      },
+      sequences: { "123456": 300 },
+      bootstrapped: { "rss:https://a.example/f": 400 },
+    }),
+  );
+
+  const store = new SeenStore(path);
+  expect(store.lastSeenMessage("a2  ambu 08123")).toBe(200);
+  expect(store.lastSeenSequence("123456")).toBe(300);
+  expect(store.isSourceBootstrapped("rss:https://a.example/f")).toBe(true);
+  store.save();
+
+  const migrated = JSON.parse(readFileSync(path, "utf8"));
+  expect(migrated.messages).toEqual({ "a2 ambu 08123": 200 });
+  expect(migrated.sequences).toEqual({ "123456": 300 });
+  expect(migrated.bootstrapped).toEqual({ "rss:https://a.example/f": 400 });
+  const reloaded = new SeenStore(path);
+  expect(reloaded.lastSeenMessage("A2 AMBU 08123")).toBe(200);
+  expect(reloaded.lastSeenSequence("123456")).toBe(300);
+  expect(reloaded.isSourceBootstrapped("rss:https://a.example/f")).toBe(true);
 });
 
 test("save is a no-op when nothing changed (dirty flag)", () => {

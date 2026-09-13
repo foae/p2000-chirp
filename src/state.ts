@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync, unlinkSync } from "node:fs";
 import { dirname } from "node:path";
+import { normalizeMessage } from "./filter";
 
 interface StateShape {
   messages: Record<string, number>;
@@ -21,7 +22,11 @@ export class SeenStore {
       const parsed = JSON.parse(readFileSync(path, "utf8")) as StateShape;
       if (parsed && typeof parsed.messages === "object" && parsed.messages !== null) {
         for (const [key, ts] of Object.entries(parsed.messages)) {
-          if (typeof ts === "number") this.messages.set(key, ts);
+          if (typeof ts !== "number") continue;
+          const normalizedKey = normalizeMessage(key);
+          const previous = this.messages.get(normalizedKey);
+          if (previous === undefined || ts > previous) this.messages.set(normalizedKey, ts);
+          if (normalizedKey !== key || previous !== undefined) this.dirty = true;
         }
       }
       if (parsed && typeof parsed.sequences === "object" && parsed.sequences !== null) {
@@ -52,7 +57,7 @@ export class SeenStore {
   }
 
   lastSeenMessage(message: string): number | undefined {
-    return this.messages.get(message);
+    return this.messages.get(normalizeMessage(message));
   }
 
   lastSeenSequence(seq: string): number | undefined {
@@ -60,16 +65,17 @@ export class SeenStore {
   }
 
   hasSeenExtension(message: string, windowMs: number, now: number = Date.now()): boolean {
+    const normalizedMessage = normalizeMessage(message);
     const cutoff = now - windowMs;
     for (const [seen, ts] of this.messages) {
       if (ts < cutoff) continue;
-      if (seen.length > message.length && seen.startsWith(message)) return true;
+      if (seen.length > normalizedMessage.length && seen.startsWith(normalizedMessage)) return true;
     }
     return false;
   }
 
   markSeen(message: string, seq: string | undefined, now: number = Date.now()): void {
-    this.messages.set(message, now);
+    this.messages.set(normalizeMessage(message), now);
     if (seq) this.sequences.set(seq, now);
     this.dirty = true;
   }

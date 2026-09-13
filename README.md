@@ -1,7 +1,7 @@
 # p2000-chirp
 
 [![CI](https://github.com/foae/p2000-chirp/actions/workflows/ci.yml/badge.svg)](https://github.com/foae/p2000-chirp/actions/workflows/ci.yml)
-[![release](https://img.shields.io/badge/release-v1.0.0-blue)](https://github.com/foae/p2000-chirp/releases)
+[![release](https://img.shields.io/github/v/release/foae/p2000-chirp)](https://github.com/foae/p2000-chirp/releases)
 [![license: MIT](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 
 Telegram notifications for [P2000](https://en.wikipedia.org/wiki/P2000_(network))
@@ -83,7 +83,7 @@ TELEGRAM_CHAT_ID=123456789
 | `state_file` | Dedupe state (JSON); survives restarts; mount it in Docker. |
 | `prune_hours` | Seen-entries older than this are dropped. |
 | `dedupe_window_seconds` | Duplicate-suppression window (default 3600, min 60). Keep it larger than how long feeds retain old items (~15–25 min) — see below. |
-| `[[sources]]` | Feed list: `type` = `rss` or `p2000alarm`, plus `url`. |
+| `[[sources]]` | Feed list: `type` = `rss` (Berkel), `p2000alarm`, or `alarmeringen`, plus `url`. |
 
 ### Area filters
 
@@ -159,8 +159,8 @@ independently, and POCSAG radio transmissions occasionally arrive corrupted
 (`B2 AMBU 1720mdKt$i#3g450L ...` for `B2 AMBU 17205 Kleiweg ...`). An item is
 suppressed when any of these holds:
 
-1. the exact message text was already delivered within
-   `dedupe_window_seconds` (default 3600), or
+1. the message text, ignoring case and repeated whitespace, was already
+   delivered within `dedupe_window_seconds` (default 3600), or
 2. the message's trailing sequence number (`bon 138437`, `Rit 134293` style
    counters most P2000 messages end with) was already delivered within the
    same window — this catches corrupted retransmissions, or
@@ -178,26 +178,40 @@ feeds retain old items (~15–25 min); a genuinely new dispatch still passes
 because its trailing sequence number differs. Side effect: a recurring
 identical status message (e.g. `Einde vws`) notifies at most once per window.
 
+Existing saved message keys are normalized on load, keeping the newest
+timestamp when keys collapse. Notification text and source bootstrap markers
+are preserved.
+
 ## Feed landscape (surveyed 2026-09)
 
 | Feed | Type | Latency | Status |
 |------|------|---------|--------|
 | `p2000.brandweer-berkel-enschot.nl/homeassistant/rss.asp` | RSS | ~10 s | used by default; national; has lat/lon |
 | `monitor.p2000alarm.nl/ReadMonitor.php` | custom text protocol | ~10 s | used by default; national; unit descriptions |
+| `alarmeringen.nl/feeds/all.rss` | RSS | not measured | used by default; national; raw dispatch titles; no coordinates |
 | `p2000-online.net` | HTML | 1.5–2 min | not implemented — too slow to matter |
 | `112-nu.nl` | RSS | n/a | account-gated (401) |
 | `feeds.livep2000.nl` | RSS | — | dead since 2021 |
 
-No official API exists and **no public websocket exists**; the two ~10 s
-mirrors above are the practical near-real-time ceiling. (Truly instant would
-mean a local RTL-SDR receiver decoding P2000 yourself — hardware, not a feed.)
+Alarmeringen preserves dispatch text in RSS titles but lowercases it. Its
+timestamps carry real UTC offsets (unlike Berkel's mislabeled timestamps).
+Discipline comes from the description's service label, falling back to message
+prefixes. It supplies no region metadata or coordinates, so configure postcodes
+or keywords to match its items. Notifications include the original item link
+and attribution under its [CC BY-NC-ND 3.0 terms](https://alarmeringen.nl/webfeeds.html).
+The provider's receiver independence and delivery latency are unverified.
+
+Other documented options include [Zwaailicht's free API](https://zwaailicht.nl/api)
+(own receiver, but rewritten text unsuitable for our cross-source dedupe) and
+[AlarmeringenP2000's paid API](https://alarmeringenp2000.nl/developers).
+These are not implemented. Do not infer delivery latency from snapshot age.
 
 Adapters live in `src/sources/`; adding a feed type is one function returning
 `P2000Item[]`.
 
 ## Caveats
 
-- Both feeds are free third-party relays with no SLA. Sources are polled on
+- The feeds are free third-party relays with no SLA. Sources are polled on
   staggered, jittered slot schedules (one slot per source, never shared);
   failing sources back off exponentially (capped at 10 minutes) and HTTP
   429s are honored via `Retry-After` (also capped at 10 minutes), so the

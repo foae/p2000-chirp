@@ -31,6 +31,7 @@ DRY_RUN=true` and the volume mounts from `docker-compose.yaml`.
 | `src/feed.ts` | `P2000Item` type, source-type dispatch |
 | `src/sources/rss.ts` | Berkel-Enschot RSS adapter |
 | `src/sources/p2000alarm.ts` | p2000alarm monitor-backend adapter |
+| `src/sources/alarmeringen.ts` | Alarmeringen RSS adapter; UTC offsets, raw titles, attributed links |
 | `src/filter.ts` | Area (OR across axes) + discipline (AND) matching, discipline inference, message/sequence utils |
 | `src/schedule.ts` | Poll pacing math: per-source interval (stagger x N, 15s floor), 1-3s jitter, exponential backoff (10 min cap) |
 | `src/state.ts` | Persistent seen-store: message text → ts, trailing sequence → ts |
@@ -87,8 +88,15 @@ naive A/B/P mapping):**
   - Region spelling differs from Berkel (`Amsterdam-Amstelland` vs
     `Amsterdam Amstelland`) — region matching normalizes case/hyphens/spaces
     and matches by substring. No lat/lon in this source.
-- **Dedupe design**: identity is message TEXT + trailing sequence number
-  (5+ digits) within a time window, NOT timestamps — mirrors stamp times
+- **Alarmeringen RSS** (`https://alarmeringen.nl/feeds/all.rss`):
+  - `title` is lowercased dispatch text; `description` is a rewritten headline.
+    Keep title as the message; use only the headline's initial service label
+    for discipline. No coordinates or region metadata: match via postcode/keyword.
+  - `pubDate` carries a real UTC offset: never apply Berkel's Amsterdam correction.
+  - Include original item link and CC BY-NC-ND 3.0 attribution in notifications.
+  - Receiver independence and delivery latency are unverified.
+- **Dedupe design**: identity is case/whitespace-normalized message TEXT +
+  trailing sequence number (5+ digits) within a time window, NOT timestamps — mirrors stamp times
   differently and radio frames arrive corrupted (same `bon 138437`, garbled
   text) or truncated (`A2 Ambu 08123` for `A2 Ambu 08123 DIA ... Rit
   276252`, caught by the one-directional prefix layer: only a message
@@ -100,9 +108,12 @@ naive A/B/P mapping):**
   dedupe to use timestamps; it was tried and it double-notifies. A message
   currently being delivered is tracked in an in-flight set so concurrent
   per-source polls cannot both send it.
+  Legacy mixed-case state keys normalize on load, merging newest timestamps;
+  sequences and bootstrap markers are preserved.
 - Dead/gated sources (surveyed 2026-09): livep2000 RSS defunct since 2021;
-  112-nu RSS requires an account; p2000-online.net is 1.5–2 min delayed. No
-  official API, no websockets exist.
+  112-nu RSS requires an account; p2000-online.net is 1.5–2 min delayed.
+  Third-party APIs now exist: Zwaailicht (free, rewritten text) and
+  AlarmeringenP2000 (paid, raw messages); neither is implemented here.
 
 ## Privacy rules (binding)
 

@@ -25,7 +25,7 @@ export interface P2000Config {
   filters: AreaFilters;
 }
 
-const SOURCE_TYPES: SourceType[] = ["rss", "p2000alarm"];
+const SOURCE_TYPES: SourceType[] = ["rss", "p2000alarm", "alarmeringen"];
 const KNOWN_DISCIPLINES = ["brandweer", "ambulance", "politie", "knrm"];
 
 function filterList(value: unknown, key: string): string[] {
@@ -69,7 +69,7 @@ function parseSources(value: unknown, configPath: string): SourceConfig[] {
     const obj = entry as Record<string, unknown>;
     const type = typeof obj.type === "string" ? (obj.type.trim() as SourceType) : "";
     if (type === "") {
-      throw new Error(`sources[${i}] requires a "type" ("rss" or "p2000alarm")`);
+      throw new Error(`sources[${i}] requires a "type" (${SOURCE_TYPES.join(", ")})`);
     }
     if (!SOURCE_TYPES.includes(type)) {
       throw new Error(`sources[${i}] has unknown type "${type}" (expected one of ${SOURCE_TYPES.join(", ")})`);

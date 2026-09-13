@@ -4,7 +4,7 @@ import type { AreaFilters } from "./config";
 export type Discipline = "Brandweer" | "Ambulance" | "Politie" | "KNRM" | "Onbekend";
 
 export function normalizeMessage(message: string): string {
-  return message.replace(/\s+/g, " ").trim();
+  return message.replace(/\s+/g, " ").trim().toLowerCase();
 }
 
 export function trailingSequence(message: string): string | undefined {

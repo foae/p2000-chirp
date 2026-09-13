@@ -66,8 +66,8 @@ test("trailing sequence extraction (5+ digits only)", () => {
   expect(trailingSequence("some 1234")).toBeUndefined();
 });
 
-test("normalizeMessage collapses whitespace", () => {
-  expect(normalizeMessage("  A2   Woerden\t 146159 ")).toBe("A2 Woerden 146159");
+test("normalizeMessage collapses whitespace and lowercases", () => {
+  expect(normalizeMessage("  A2   Woerden\t 146159 ")).toBe("a2 woerden 146159");
 });
 
 const noFilters = { regions: [], postcodes: [], keywords: [], disciplines: [], radius: null };

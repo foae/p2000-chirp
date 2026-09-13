@@ -1,5 +1,6 @@
 import { fetchRss } from "./sources/rss";
 import { fetchP2000Alarm } from "./sources/p2000alarm";
+import { fetchAlarmeringen } from "./sources/alarmeringen";
 
 export interface P2000Item {
   source: string;
@@ -13,7 +14,7 @@ export interface P2000Item {
   detail?: string;
 }
 
-export type SourceType = "rss" | "p2000alarm";
+export type SourceType = "rss" | "p2000alarm" | "alarmeringen";
 
 export interface SourceConfig {
   type: SourceType;
@@ -39,5 +40,6 @@ export function httpError(res: Response, url: string): never {
 export async function fetchItems(source: SourceConfig): Promise<P2000Item[]> {
   if (source.type === "rss") return fetchRss(source.url);
   if (source.type === "p2000alarm") return fetchP2000Alarm(source.url);
+  if (source.type === "alarmeringen") return fetchAlarmeringen(source.url);
   throw new Error(`unknown source type "${source.type}"`);
 }
