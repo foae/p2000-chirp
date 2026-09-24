@@ -25,7 +25,7 @@ areas you care about, and pushes a Telegram DM per incident.
 
 ## Quickstart (local)
 
-Requires [Bun](https://bun.sh) 1.3+.
+Requires [Bun](https://bun.sh) 1.3+; Docker and CI use Bun 1.4.2.
 
 ```bash
 git clone https://github.com/foae/p2000-chirp.git && cd p2000-chirp
