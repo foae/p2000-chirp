@@ -47,6 +47,16 @@ keywords = []
 # Short forms work: "Brandweer" matches "Brandweerdiensten".
 disciplines = ["Brandweer", "Ambulance", "Politie"]
 
+# Ambulance-only code filter (AND with area/discipline); selected codes are OR.
+# Defaults even when omitted: A0, A1, A2 or DIA. [] disables this restriction.
+# Police and firefighters are unaffected. A2 VWS still passes because of A2.
+# Meaning names also work, e.g. "urgent", "direct-dispatch"; see README.
+ambulance_codes = ["A0", "A1", "A2", "DIA"]
+# Optional service-specific code filters; [] keeps all police/fire alerts.
+# Examples: fire_codes = ["P1", "automatic-fire-alarm"], police_codes = ["FO"].
+fire_codes = []
+police_codes = []
+
 # Optional radius axis: notify when an item carries coordinates within
 # `km` of lat/lon (only the RSS source provides coordinates; items without
 # them rely on the axes above). Find your lat/lon by right-clicking in

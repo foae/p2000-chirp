@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import type { SourceConfig, SourceType } from "./feed";
+import { AMBULANCE_CODES, FIRE_CODES, POLICE_CODES, parseCodeSelection } from "./codes";
 
 export interface RadiusFilter {
   lat: number;
@@ -12,6 +13,9 @@ export interface AreaFilters {
   postcodes: string[];
   keywords: string[];
   disciplines: string[];
+  ambulanceCodes: string[];
+  fireCodes: string[];
+  policeCodes: string[];
   radius: RadiusFilter | null;
 }
 
@@ -118,6 +122,13 @@ export function loadConfig(path: string): P2000Config {
     postcodes: filterList(filtersRaw.postcodes, "postcodes"),
     keywords: filterList(filtersRaw.keywords, "keywords"),
     disciplines,
+    ambulanceCodes: parseCodeSelection(
+      filterList(filtersRaw.ambulance_codes ?? ["A0", "A1", "A2", "DIA"], "ambulance_codes"),
+      AMBULANCE_CODES,
+      "ambulance_codes",
+    ),
+    fireCodes: parseCodeSelection(filterList(filtersRaw.fire_codes, "fire_codes"), FIRE_CODES, "fire_codes"),
+    policeCodes: parseCodeSelection(filterList(filtersRaw.police_codes, "police_codes"), POLICE_CODES, "police_codes"),
     radius: parseRadius(filtersRaw.radius),
   };
   const num = (key: string, def: number, min: number): number => {

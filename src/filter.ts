@@ -1,3 +1,4 @@
+import { CODE_CATALOGS } from "./codes";
 import type { P2000Item } from "./feed";
 import type { AreaFilters } from "./config";
 
@@ -31,6 +32,17 @@ export function matchesDiscipline(item: P2000Item, disciplines: string[]): boole
   const d = inferDiscipline(item);
   if (d === "Onbekend") return false;
   return disciplines.some((configured) => d.toLowerCase().startsWith(configured.trim().toLowerCase()));
+}
+
+export function matchesDispatchCodes(item: P2000Item, filters: AreaFilters): boolean {
+  const discipline = inferDiscipline(item);
+  const selected = discipline === "Ambulance" ? filters.ambulanceCodes
+    : discipline === "Brandweer" ? filters.fireCodes
+      : discipline === "Politie" ? filters.policeCodes
+        : undefined;
+  if (!selected || selected.length === 0) return true;
+  return CODE_CATALOGS[discipline].some((entry) =>
+    selected.includes(entry.code) && entry.pattern.test(item.message));
 }
 
 function normalizeRegion(value: string): string {

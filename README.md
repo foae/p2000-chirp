@@ -88,7 +88,7 @@ TELEGRAM_CHAT_ID=123456789
 ### Area filters
 
 Under `[filters]` there are four **area axes** — `regions`, `postcodes`,
-`keywords` and `radius` — plus one **discipline axis**.
+`keywords` and `radius` — plus discipline and service-specific code filters.
 
 **Area semantics: any configured axis acts as an independent trigger
 (logical OR).** An item passes if at least one configured axis matches it;
@@ -150,6 +150,128 @@ km = 1.5
 `disciplines = ["Brandweer", "Ambulance", "Politie"]` is a hard AND filter on
 top of the area filter (add `"KNRM"` if you're coastal); short forms work and
 typos are rejected at startup.
+
+### Ambulance-code filters
+
+```toml
+[filters]
+disciplines = ["Brandweer", "Ambulance", "Politie"]
+ambulance_codes = ["A0", "A1", "A2", "DIA"]
+```
+
+These are the defaults when `ambulance_codes` is omitted, including in an
+existing config. **v2 migration:** set `ambulance_codes = []` to retain the old
+behavior of accepting ambulance messages regardless of code.
+
+Selected codes match with **OR**: an A0, A1 or A2 dispatch passes without DIA;
+a DIA dispatch passes without one of those priorities. An A2 VWS relocation
+therefore also passes. Ordinary B1/B2 transport without DIA is excluded by
+default. Matching is case-insensitive and uses complete tokens, not substrings.
+Unknown ambulance codes do not pass a nonempty selection.
+
+This restriction applies **only to items classified as Ambulance**. Police,
+firefighters and other disciplines are unaffected by this filter. Every item
+must still pass the existing area and discipline filters. Code filtering cannot
+recover incidents absent from the public feeds, or missing geographic data.
+
+Each entry accepts either a code or its meaning name from the table below,
+e.g. `ambulance_codes = ["emergency", "direct-dispatch"]`. Unknown entries fail
+at startup rather than silently suppressing notifications.
+
+### Dispatch-code meanings
+
+Notifications explain recognized codes in Dutch, alongside the unaltered
+dispatch text and source attribution. Explanations never change dedupe identity.
+Source discipline metadata takes precedence over message prefixes;
+`B1/B2` are ambulance codes, while `P 1/P 2` are firefighter priorities.
+
+| Code | Meaning name for filtering | Explanation |
+|------|----------------------------|-------------|
+| A0 | `highest-urgency` | Highest urgency: immediate response with the greatest possible urgency. |
+| A1 | `emergency` | Emergency response: vital functions may be threatened. |
+| A2 | `urgent` | Urgent response, without established immediate danger to life. Not routine transport. |
+| B1 | `high-complexity-transport` | Non-emergency transport requiring high-complexity care. |
+| B2 | `medium-low-complexity-transport` | Non-emergency transport requiring medium/low-complexity care. |
+| DIA | `direct-dispatch` | Directe Inzet Ambulance: dispatched while the caller is still being questioned; the response may later be cancelled or changed. `Directe inzet: ja` is recognized too. |
+| VWS | `coverage-relocation` | Voorwaardenscheppend: ambulance coverage/repositioning, not necessarily a patient incident. Read the raw text for status, e.g. `Einde VWS`. |
+
+An initial ambulance unit number such as `09123` can be displayed as callsign
+`09-123`. Explicit `bon`/`rit` numbers identify a dispatch/trip, not a medical
+condition. Unlabelled trailing numbers are left unexplained: they could be
+unit numbers or references. Capcodes identify paging recipients/groups, not
+diagnoses, and are distinct from vehicle callsigns.
+
+Do not infer patient diagnoses, outcomes, actual arrival times, current vehicle
+locations, or station assignments from these codes. Public vehicle directories
+can help research a callsign but can become stale. Regional codes such as
+`BDH-02` remain verbatim unless their meaning has been verified.
+
+Sources checked 2026-09-24:
+- [Ambulancezorg Nederland: current urgency categories, including A0/B1/B2](https://www.ambulancezorg.nl/nieuws/verbeterde-urgentie-indeling-ambulancezorg-geeft-meer-duidelijkheid).
+- [AZN Uniform Begrippenkader, 2013: A1/A2, VWS and trip terminology](https://www.ambulancezorg.nl/static/upload/raw/5816145d-51fc-4fc9-ac53-30010ecb90dc/azn-ubk-2013-def.pdf). Its old three-category model is superseded by the current categories above.
+- [Ambulance Amsterdam: DIA in practice](https://ambulanceamsterdam.nl/blog/niet-naar-het-ziekenhuis/).
+- [Public callsign directory, non-authoritative](https://www.hulpdienstenvoertuigennl.nl/ambulances-amsterdam-amstelland).
+- [Rijksoverheid: closed C2000 communications and the P2000 paging layer](https://www.rijksoverheid.nl/themas/recht-veiligheid-en-defensie/communicatie-hulpdiensten-c2000/c2000). P2000 is not a complete incident register.
+
+### Firefighter and police codes
+
+`fire_codes` and `police_codes` work like `ambulance_codes`: code names or
+meaning names, case-insensitive, OR within each service, AND with area and
+discipline filters. Both default to **`[]` (unrestricted)**. For example:
+
+```toml
+[filters]
+ambulance_codes = ["A0", "A1", "A2", "DIA"]
+fire_codes = ["emergency", "automatic-fire-alarm"]
+police_codes = ["highest-urgency", "forensic-investigation"]
+```
+
+The example restricts fire/police alerts; leave their arrays empty to keep
+receiving all of them. A police message cannot match an ambulance or fire code
+just because it contains the same text. Explanations are independent of filter
+selection: every recognized code is explained, not just the code that matched.
+
+| Service | Code for filtering | Meaning name | Explanation |
+|---------|--------------------|--------------|-------------|
+| Fire | P1 | `emergency` | Urgent task; respond as quickly as possible. Message forms `P1`, `P 1`, `Prio 1`. |
+| Fire | P2 | `prompt-response` | Respond promptly, without a directly urgent task. Also `P 2`/`Prio 2`. |
+| Fire | OMS | `automatic-fire-alarm` | Openbaar Meldsysteem: automatic fire alarm, **not confirmation of fire**. |
+| Fire | TS | `fire-engine` | Tankautospuit. |
+| Fire | HW | `aerial-platform` | Hoogwerker. |
+| Fire | AL | `aerial-ladder` | Autoladder; only recognized as `(AL)` or before a six-digit unit number. |
+| Fire | HV | `rescue-vehicle` | Hulpverleningsvoertuig; only `(HV)` or before a six-digit unit number. |
+| Fire | WO | `water-incident-or-unit` | Waterongeval **or** waterongevallenvoertuig; context determines which. |
+| Fire | OVD | `duty-officer` | Officier van Dienst (brandweer), also message form `OvD-B`, not `OvD-P`. |
+| Police | PRIO1 | `highest-urgency` | Highest police dispatch urgency; only explicit initial `Prio 1`/`Prio1`. Not bare `1` or firefighter `P1`. |
+| Police | OVD-P | `duty-officer` | Officier van Dienst Politie, also message form `OVDP`. |
+| Police | FO | `forensic-investigation` | Forensische Opsporing; also `FO-Verkeer` (traffic investigation). |
+| Both | GRIP | `crisis-coordination` | Gecoördineerde Regionale Incidentbestrijdingsprocedure; multi-agency crisis coordination. The raw level is retained, not interpreted as fire severity. |
+
+Short words need context: `al` in ordinary Dutch must not become an autoladder.
+`HV`/`WO` can be ambiguous between incident and resource labels; the recognizer
+deliberately does not treat arbitrary `HV` text as a vehicle. Full tokens are
+required; fragments inside words or identifiers do not match. Priority codes
+are recognized only at the start, not as road numbers elsewhere in a message.
+
+**Limits:** the national fire driving guideline removed P3, although local
+glossaries still list it as “geen spoed”. It is left unexplained, not presented
+as a current national priority. Police Prio 2/3 are also left unexplained:
+the GMS priorities cannot simply be mapped to “spoed, nu, later”. Priority
+does not prove current lights/siren use; police permission is explicitly
+separate from dispatch priority. `BR`, `BNH-xx`, `BDH-xx`, police bare-number
+prefixes and `ICnum` remain raw: no authoritative expansion was verified here.
+Police role meanings are verified, not their frequency in these feeds.
+
+Sources:
+- [Brandweer Nederland/NIPV: driving guideline, priorities and P3 removal](https://archief.nipv.nl/documenten/optische-en-geluidssignalen-brandweer/).
+- [Brandweer: automatic fire reporting / OMS](https://www.brandweer.nl/onderwerpen/automatisch-melden-van-brand/).
+- [Brandweer Fryslân: TS/HW/WO/HV vehicles](https://www.brandweer.nl/fryslan/voertuigen/).
+- [Brandweer Uitgeest: dispatch glossary](https://brandweeruitgeest.nl/betekenis-p2000-meldingen/); useful for resource abbreviations, but its ambulance/P3 priority text is outdated.
+- [Brandweer: Officier van Dienst role](https://www.brandweer.nl/nieuws/rob-het-onvoorspelbare-geeft-mij-energie/).
+- [Veiligheidsregio IJsselland: GRIP](https://www.vrijsselland.nl/crisisbeheersing-en-rampenbestrijding/).
+- [Politie: Prio 1](https://kombijde.politie.nl/blog/meldkamer/werken-in-de-meldkamer-politie), [OvD-P](https://kombijde.politie.nl/blog/agent/docuserie-blauw-may), [FO-Verkeer](https://www.politie.nl/mijn-buurt/politiebureaus/05/fo-verkeer.html).
+- [Politie: driving guideline, separate permission for signals](https://www.politie.nl/binaries/content/assets/politie/onderwerpen/verkeershandhaving/79226975-1744-4ed3-afe5-7c16078232da.pdf).
+- [Inspectie Noodhulp response: GMS priorities versus spoed/nu/later](https://open.overheid.nl/documenten/ronl-6943c491-ae9d-4119-ba67-cef077cc998b/pdf), p. 4.
 
 ## How dedupe works
 
@@ -225,7 +347,7 @@ Adapters live in `src/sources/`; adding a feed type is one function returning
 - Politie items often carry no region metadata; discipline is taken from the
   source's own classification when available (RSS `Dienst` field /
   p2000alarm record class) and otherwise inferred from the message prefix —
-  `A1/A2` and `B1/B2` are ambulance priorities (B = geen-spoed rit), `P 1`/
+  `A0/A1/A2` and `B1/B2` are ambulance priorities (B = geen-spoed rit), `P 1`/
   `P 2` are brandweer priority alerts, politie messages carry no letter
   prefix. Region-less items still match via postcodes/keywords/radius.
 - P2000 is the paging layer — it does not represent every incident or police

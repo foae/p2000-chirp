@@ -5,6 +5,7 @@ import {
   inferDiscipline,
   matchesArea,
   matchesDiscipline,
+  matchesDispatchCodes,
   normalizeMessage,
   trailingSequence,
 } from "../filter";
@@ -70,7 +71,7 @@ test("normalizeMessage collapses whitespace and lowercases", () => {
   expect(normalizeMessage("  A2   Woerden\t 146159 ")).toBe("a2 woerden 146159");
 });
 
-const noFilters = { regions: [], postcodes: [], keywords: [], disciplines: [], radius: null };
+const noFilters = { regions: [], postcodes: [], keywords: [], disciplines: [], ambulanceCodes: [], fireCodes: [], policeCodes: [], radius: null };
 const dom = { lat: 52.0907, lon: 5.1214, km: 1.5 };
 
 test.each(["3511AB", "3511 ZZ", "3511bg", "3511"])(
@@ -154,4 +155,58 @@ test("discipline short forms match via prefix", () => {
   const ambulance = item({ dienst: "Ambulancediensten", message: "A1 test" });
   expect(matchesDiscipline(ambulance, ["Ambu"])).toBe(true);
   expect(matchesDiscipline(ambulance, ["Politie"])).toBe(false);
+});
+
+test("ambulance codes are OR alternatives and do not restrict other services", () => {
+  const filters = { ...noFilters, ambulanceCodes: ["A0", "A1", "A2", "DIA"] };
+  for (const message of ["A0 09123 Utrecht", "a1 09123 Utrecht", "A2 (VWS) 09123 Utrecht", "B2 AMBU 09123 (DIA) Utrecht", "Directe inzet: ja"]) {
+    expect(matchesDispatchCodes(item({ dienst: "Ambulance", message }), filters)).toBe(true);
+  }
+  for (const message of ["B1 09123 Utrecht", "B2 AMBU 09123 Utrecht", "Onbekende inzet"]) {
+    expect(matchesDispatchCodes(item({ dienst: "Ambulance", message }), filters)).toBe(false);
+  }
+  expect(matchesDispatchCodes(item({ dienst: "Politiediensten", message: "Aanrijding letsel" }), filters)).toBe(true);
+  expect(matchesDispatchCodes(item({ dienst: "Brandweerdiensten", message: "P 1 BR woning" }), filters)).toBe(true);
+  expect(matchesDispatchCodes(item({ dienst: "KNRM", message: "Groepsoproep" }), filters)).toBe(true);
+  expect(matchesDispatchCodes(item({ message: "A0 Utrecht" }), filters)).toBe(true);
+  expect(matchesDispatchCodes(item({ message: "B2 Utrecht" }), filters)).toBe(false);
+});
+
+test("code selection respects token boundaries and priority position", () => {
+  const filters = { ...noFilters, ambulanceCodes: ["A1", "DIA"] };
+  for (const message of ["A10 Utrecht", "A1X Utrecht", "B2 snelweg A1 Utrecht", "B2 Diakonessenhuis", "B2 DIA2", "B2 DIAé", "B2 directé inzet: ja", "B2 Directe inzet: nee", "B2 Directe inzet: jaar"]) {
+    expect(matchesDispatchCodes(item({ dienst: "Ambulance", message }), filters)).toBe(false);
+  }
+  expect(matchesDispatchCodes(item({ dienst: "Ambulance", message: "a 1 (dia) Utrecht" }), filters)).toBe(true);
+  expect(matchesDispatchCodes(item({ dienst: "Ambulance", message: "B2 Utrecht" }), noFilters)).toBe(true);
+});
+
+test("fire and police selections respect metadata, alternatives and unsupported priorities", () => {
+  const filters = { ...noFilters, fireCodes: ["P1", "OMS"], policeCodes: ["PRIO1", "FO"] };
+  for (const message of ["P1 Utrecht", "p 1 Utrecht", "Prio 1 Utrecht", "P 2 OMS Utrecht"]) {
+    expect(matchesDispatchCodes(item({ dienst: "Brandweer", message }), filters)).toBe(true);
+  }
+  for (const message of ["P3 Utrecht", "P 2 Utrecht", "P123 Utrecht", "A1 Utrecht", "B1 Utrecht"]) {
+    expect(matchesDispatchCodes(item({ dienst: "Brandweer", message }), filters)).toBe(false);
+  }
+  for (const message of ["Prio1 Utrecht", "prio 1 Utrecht", "FO graag contact", "FO-Verkeer Utrecht"]) {
+    expect(matchesDispatchCodes(item({ dienst: "Politie", message }), filters)).toBe(true);
+  }
+  for (const message of ["P1 Utrecht", "1 Ongeval Utrecht", "Prio2 Utrecht", "Prio10 Utrecht", "FOO Utrecht"]) {
+    expect(matchesDispatchCodes(item({ dienst: "Politie", message }), filters)).toBe(false);
+  }
+  expect(matchesDispatchCodes(item({ dienst: "Politie", message: "P1 OMS Utrecht" }), filters)).toBe(false);
+  expect(matchesDispatchCodes(item({ dienst: "Ambulance", message: "B2 Utrecht" }), filters)).toBe(true);
+});
+
+test("ambiguous resource words and officer suffixes require their service context", () => {
+  const resources = { ...noFilters, fireCodes: ["AL", "HV", "OVD"], policeCodes: ["OVD-P"] };
+  for (const message of ["P 2 Utrecht (AL)", "P 2 HV 090123", "P 1 OvD-B Utrecht"]) {
+    expect(matchesDispatchCodes(item({ dienst: "Brandweer", message }), resources)).toBe(true);
+  }
+  for (const message of ["P 2 al onderweg", "P 2 HV onbekend", "P 1 OvD-P Utrecht", "P 1 AL 090123é"]) {
+    expect(matchesDispatchCodes(item({ dienst: "Brandweer", message }), resources)).toBe(false);
+  }
+  expect(matchesDispatchCodes(item({ dienst: "Politie", message: "OVDP Utrecht" }), resources)).toBe(true);
+  expect(matchesDispatchCodes(item({ dienst: "Politie", message: "OVD-B Utrecht" }), resources)).toBe(false);
 });

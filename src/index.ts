@@ -1,6 +1,7 @@
 import { loadConfig } from "./config";
+import { explainDispatch } from "./codes";
 import { fetchItems, type P2000Item } from "./feed";
-import { inferDiscipline, matchesArea, matchesDiscipline, normalizeMessage, trailingSequence } from "./filter";
+import { inferDiscipline, matchesArea, matchesDiscipline, matchesDispatchCodes, normalizeMessage, trailingSequence } from "./filter";
 import { failureWaitMs, jitterMs, nextSlotMs, perSourceIntervalMs } from "./schedule";
 import { SeenStore } from "./state";
 import { sendTelegram } from "./telegram";
@@ -56,7 +57,7 @@ function isDuplicate(item: P2000Item): boolean {
 
 function format(item: P2000Item): string {
   const discipline = inferDiscipline(item);
-  const prio = item.message.match(/^\s*([ABPN])\s?([12])/i);
+  const prio = item.message.match(/^\s*([ABPN]|Prio)\s?([012])(?![\p{L}\p{M}\p{N}_])/iu);
   const prioText = prio ? `${prio[1].toUpperCase()}${prio[2]}` : "";
   const time = item.pubDate.toLocaleTimeString("nl-NL", {
     timeZone: "Europe/Amsterdam",
@@ -66,6 +67,7 @@ function format(item: P2000Item): string {
   });
   const header = [discipline, prioText, item.regName || "regio onbekend", time].filter(Boolean).join(" · ");
   const lines = [header, item.message];
+  lines.push(...explainDispatch(item.message, discipline));
   if (item.detail) lines.push(item.detail);
   return lines.join("\n");
 }
@@ -101,7 +103,8 @@ async function processItems(label: string, items: P2000Item[]): Promise<void> {
   items.sort((a, b) => a.pubDate.getTime() - b.pubDate.getTime());
   const fresh = items.filter(
     (item) =>
-      !isDuplicate(item) && matchesArea(item, config.filters) && matchesDiscipline(item, config.filters.disciplines),
+      !isDuplicate(item) && matchesArea(item, config.filters) &&
+      matchesDiscipline(item, config.filters.disciplines) && matchesDispatchCodes(item, config.filters),
   );
   if (debug) {
     console.log(`[debug] poll ${label}: ${items.length} items, fresh+relevant=${fresh.length}`);

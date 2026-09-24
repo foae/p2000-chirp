@@ -49,6 +49,7 @@ test("Alarmeringen RSS preserves the raw dispatch title for postcode filtering",
   expect(parsed.message).toBe("p 1 melding 1234AB & vervolg");
   expect(matchesArea(parsed, {
     regions: [], postcodes: ["1234"], keywords: [], disciplines: [], radius: null,
+    ambulanceCodes: [], fireCodes: [], policeCodes: [],
   })).toBe(true);
   expect(parsed.detail).toBe(
     "Bron: Alarmeringen.nl (CC BY-NC-ND 3.0)\nhttps://alarmeringen.nl/incident/123?utm_source=rss",
