@@ -45,18 +45,13 @@ process.on("SIGINT", () => {
 const inFlight = new Set<string>();
 
 function isDuplicate(item: P2000Item): boolean {
-  const now = Date.now();
   const message = normalizeMessage(item.message);
-  if (inFlight.has(message)) return true;
-  const lastMsg = store.lastSeenMessage(message);
-  if (lastMsg !== undefined && now - lastMsg < dedupeWindowMs) return true;
   const seq = trailingSequence(message);
-  if (seq) {
-    const lastSeq = store.lastSeenSequence(seq);
-    if (lastSeq !== undefined && now - lastSeq < dedupeWindowMs) return true;
+  for (const pending of inFlight) {
+    if (pending === message || pending.startsWith(message) ||
+      (seq !== undefined && trailingSequence(pending) === seq)) return true;
   }
-  if (store.hasSeenExtension(message, dedupeWindowMs, now)) return true;
-  return false;
+  return store.observeDuplicate(message, dedupeWindowMs);
 }
 
 function format(item: P2000Item): string {
@@ -114,7 +109,7 @@ async function processItems(label: string, items: P2000Item[]): Promise<void> {
   try {
     for (const item of fresh) {
       const message = normalizeMessage(item.message);
-      if (isDuplicate(item) || inFlight.has(message)) continue;
+      if (isDuplicate(item)) continue;
       inFlight.add(message);
       try {
         const text = format(item);
@@ -205,8 +200,8 @@ if (f.disciplines.length === 0) {
 }
 console.log(
   `p2000-chirp: polling ${config.sources.length} source(s) ${config.pollIntervalSeconds}s apart` +
-    ` (each source every ${Math.round(intervalMs / 1000)}s + 1-3s jitter)` +
-    ` (state: ${config.stateFile})${dryRun ? " [dry-run]" : ""}${debug ? " [debug]" : ""}`,
+  ` (each source every ${Math.round(intervalMs / 1000)}s + 1-3s jitter)` +
+  ` (state: ${config.stateFile})${dryRun ? " [dry-run]" : ""}${debug ? " [debug]" : ""}`,
 );
 
 while (true) {

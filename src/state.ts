@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync, unlinkSync } from "node:fs";
 import { dirname } from "node:path";
-import { normalizeMessage } from "./filter";
+import { normalizeMessage, trailingSequence } from "./filter";
 
 interface StateShape {
   messages: Record<string, number>;
@@ -62,6 +62,21 @@ export class SeenStore {
 
   lastSeenSequence(seq: string): number | undefined {
     return this.sequences.get(seq);
+  }
+
+  // Refresh only known duplicates: observing an undelivered item must not
+  // suppress its retry. Retained feed snapshots keep their identity alive.
+  observeDuplicate(message: string, windowMs: number, now: number = Date.now()): boolean {
+    const normalized = normalizeMessage(message);
+    const seq = trailingSequence(normalized);
+    const lastMessage = this.lastSeenMessage(normalized);
+    const lastSequence = seq ? this.lastSeenSequence(seq) : undefined;
+    const duplicate =
+      (lastMessage !== undefined && now - lastMessage < windowMs) ||
+      (lastSequence !== undefined && now - lastSequence < windowMs) ||
+      this.hasSeenExtension(normalized, windowMs, now);
+    if (duplicate) this.markSeen(normalized, seq, now);
+    return duplicate;
   }
 
   hasSeenExtension(message: string, windowMs: number, now: number = Date.now()): boolean {

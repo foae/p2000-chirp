@@ -82,7 +82,7 @@ TELEGRAM_CHAT_ID=123456789
 | `stale_after_minutes` | One-time warning when the newest feed item gets older than this. |
 | `state_file` | Dedupe state (JSON); survives restarts; mount it in Docker. |
 | `prune_hours` | Seen-entries older than this are dropped. |
-| `dedupe_window_seconds` | Duplicate-suppression window (default 3600, min 60). Keep it larger than how long feeds retain old items (~15–25 min) — see below. |
+| `dedupe_window_seconds` | Duplicate-suppression quiet window (default 3600, min 60), refreshed whenever a known duplicate appears in a feed. |
 | `[[sources]]` | Feed list: `type` = `rss` (Berkel), `p2000alarm`, or `alarmeringen`, plus `url`. |
 
 ### Area filters
@@ -159,24 +159,29 @@ independently, and POCSAG radio transmissions occasionally arrive corrupted
 (`B2 AMBU 1720mdKt$i#3g450L ...` for `B2 AMBU 17205 Kleiweg ...`). An item is
 suppressed when any of these holds:
 
-1. the message text, ignoring case and repeated whitespace, was already
-   delivered within `dedupe_window_seconds` (default 3600), or
+1. the message text, ignoring case and repeated whitespace, is still in the
+   dedupe window (`dedupe_window_seconds`, default 3600), or
 2. the message's trailing sequence number (`bon 138437`, `Rit 134293` style
-   counters most P2000 messages end with) was already delivered within the
-   same window — this catches corrupted retransmissions, or
-3. the message is a strict prefix of one already delivered within the same
-   window — this catches truncated radio retransmissions, which lose their
+   counters most P2000 messages end with) is in the same window — this
+   catches corrupted retransmissions, or
+3. the message is a strict prefix of one in the same window — this catches
+   truncated radio retransmissions, which lose their
    trailing sequence (e.g. `A2 Ambu 08123` for
    `A2 Ambu 08123 DIA Groesbeek Rit 276252`). Deliberately one-directional:
    a longer new dispatch is never suppressed by an earlier short one, so a
    genuinely new dispatch can only be swallowed in the rare case that it is
    itself a truncation of an unrelated recently delivered message.
 
-The window, not timestamps, drives dedupe: mirrors stamp times differently,
-so text is the only reliable identity. The window must exceed how long the
-feeds retain old items (~15–25 min); a genuinely new dispatch still passes
-because its trailing sequence number differs. Side effect: a recurring
-identical status message (e.g. `Einde vws`) notifies at most once per window.
+The window, not dispatch timestamps, drives dedupe: mirrors stamp times
+differently. Delivery or bootstrap records an identity; each subsequent
+duplicate observation refreshes it, including across restarts. Retained
+snapshots therefore cannot re-notify hourly (Alarmeringen can retain items
+for hours). The identity expires after a full window without observation;
+outages longer than that can allow old items through again. A genuinely new
+dispatch still passes when its text and sequence differ. Identical recurring
+status messages (e.g. `Einde vws`) remain suppressed while continuously present.
+Concurrent deliveries use the same text, sequence and one-directional prefix
+checks against in-flight messages; failed sends remain retryable.
 
 Existing saved message keys are normalized on load, keeping the newest
 timestamp when keys collapse. Notification text and source bootstrap markers

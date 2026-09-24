@@ -26,6 +26,33 @@ test("mixed-case cross-source messages dedupe exactly and by truncated prefix", 
   expect(store.hasSeenExtension("a2 ambu 08123", 3_600_000, t0 + 5_000)).toBe(true);
 });
 
+test("retained cross-source snapshots stay suppressed beyond the original window and restart", () => {
+  const path = freshPath();
+  let store = new SeenStore(path);
+  const message = "A1 09123 Utrecht 3511 123456";
+  const window = 3_600_000;
+  store.markSeen(message, "123456", 0);
+  for (let now = 900_000; now <= 3 * window; now += 900_000) {
+    expect(store.observeDuplicate(message.toLowerCase(), window, now)).toBe(true);
+    store.save();
+    store = new SeenStore(path);
+  }
+  expect(store.observeDuplicate(message, window, 4 * window)).toBe(false);
+  expect(store.observeDuplicate(message, window, 4 * window + 1)).toBe(false);
+});
+
+test("sequence and truncated duplicates refresh while new dispatches and undelivered items pass", () => {
+  const store = new SeenStore(freshPath());
+  store.markSeen("A2 AMBU 09123 Utrecht Rit 123456", "123456", 0);
+  expect(store.observeDuplicate("a2 ambu 09123", 1000, 900)).toBe(true);
+  expect(store.observeDuplicate("a2 ambu 09123", 1000, 1800)).toBe(true);
+  expect(store.observeDuplicate("A2 AMBU 09123 Utrecht Rit 123457", 1000, 900)).toBe(false);
+  expect(store.observeDuplicate("garbled dispatch 123456", 1000, 900)).toBe(true);
+  expect(store.observeDuplicate("another copy 123456", 1000, 1800)).toBe(true);
+  expect(store.observeDuplicate("new dispatch 654321", 1000, 1800)).toBe(false);
+  expect(store.observeDuplicate("new dispatch 654321", 1000, 1900)).toBe(false);
+});
+
 test("markSeen refresh overrides earlier timestamp", () => {
   const store = new SeenStore(freshPath());
   store.markSeen("msg", undefined, 1_000);

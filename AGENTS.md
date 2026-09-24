@@ -101,13 +101,15 @@ naive A/B/P mapping):**
   text) or truncated (`A2 Ambu 08123` for `A2 Ambu 08123 DIA ... Rit
   276252`, caught by the one-directional prefix layer: only a message
   strictly shorter than one already delivered is a duplicate, so a longer
-  new dispatch is never suppressed). The window (default 3600 s) must
-  EXCEED how long a feed retains old items (~15–25 min for these sources),
-  or retained items re-notify every window; genuinely new dispatches still
-  pass because their trailing bon/rit/sequence numbers differ. Do not "fix"
-  dedupe to use timestamps; it was tried and it double-notifies. A message
-  currently being delivered is tracked in an in-flight set so concurrent
-  per-source polls cannot both send it.
+  new dispatch is never suppressed). The window (default 3600 s) measures
+  time since the latest duplicate observation, not just delivery:
+  Alarmeringen retains some items for hours, so fixed delivery-age expiry
+  caused hourly duplicates (production logs, 2026-09-24). Known duplicates
+  refresh persisted message/sequence identities; unseen items do not, so
+  failed deliveries remain retryable. New text/sequence identities still
+  pass. Do not "fix" dedupe to use dispatch timestamps; it double-notifies.
+  In-flight messages use text, sequence and one-directional prefix checks
+  so concurrent per-source polls cannot both send them.
   Legacy mixed-case state keys normalize on load, merging newest timestamps;
   sequences and bootstrap markers are preserved.
 - Dead/gated sources (surveyed 2026-09): livep2000 RSS defunct since 2021;
