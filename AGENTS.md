@@ -119,8 +119,10 @@ naive A/B/P mapping):**
 
 ## Privacy rules (binding)
 
-- `config.toml`, `.env`, `state/` are the owner's PERSONAL files — never
-  commit them, never log their contents (bot token especially).
+- `.env` contains secrets — do not read or log its contents, and never commit it.
+- `config.toml` and `state/` are private only for version control — never
+  commit them. Reading, inspecting, and discussing their contents in chat
+  is allowed, including configured street names and historical state.
 - The repo must stay generic: when touching `config.example.toml`, README
   examples or docs, use neutral sample values (e.g. Utrecht postcodes/coords)
   — never the owner's actual postcodes, coordinates or neighborhood names.
