@@ -1,6 +1,6 @@
 {
   "name": "p2000-chirp",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "type": "module",
   "scripts": {
     "start": "bun run src/index.ts",
