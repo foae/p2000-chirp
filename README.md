@@ -182,6 +182,11 @@ at startup rather than silently suppressing notifications.
 
 Notifications explain recognized codes in Dutch, alongside the unaltered
 dispatch text and source attribution. Explanations never change dedupe identity.
+Messages use service icons (🚑 ambulance, 🚒 fire, 🚓 police, 🛟 KNRM),
+a compact Amsterdam-time/region header, and spaced **Melding** / **Betekenis**
+sections with bulleted explanations. Unknown regions and empty explanation
+sections are omitted; source links and attribution remain intact. Telegram
+messages stay plain text, so dispatch punctuation is displayed literally.
 Source discipline metadata takes precedence over message prefixes;
 `B1/B2` are ambulance codes, while `P 1/P 2` are firefighter priorities.
 

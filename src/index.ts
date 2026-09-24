@@ -55,6 +55,14 @@ function isDuplicate(item: P2000Item): boolean {
   return store.observeDuplicate(message, dedupeWindowMs);
 }
 
+const SERVICE_ICONS = {
+  Ambulance: "🚑",
+  Brandweer: "🚒",
+  Politie: "🚓",
+  KNRM: "🛟",
+  Onbekend: "📟",
+};
+
 function format(item: P2000Item): string {
   const discipline = inferDiscipline(item);
   const prio = item.message.match(/^\s*([ABPN]|Prio)\s?([012])(?![\p{L}\p{M}\p{N}_])/iu);
@@ -65,10 +73,15 @@ function format(item: P2000Item): string {
     minute: "2-digit",
     second: "2-digit",
   });
-  const header = [discipline, prioText, item.regName || "regio onbekend", time].filter(Boolean).join(" · ");
-  const lines = [header, item.message];
-  lines.push(...explainDispatch(item.message, discipline));
-  if (item.detail) lines.push(item.detail);
+  const header = `${SERVICE_ICONS[discipline]} ${discipline}${prioText ? ` · ${prioText}` : ""}`;
+  const metadata = [`🕒 ${time}`];
+  if (item.regName) metadata.push(`📍 ${item.regName}`);
+  const lines = [header, metadata.join("  ·  "), "", "📟 Melding", item.message];
+  const explanations = explainDispatch(item.message, discipline);
+  if (explanations.length > 0) {
+    lines.push("", "💡 Betekenis", ...explanations.map((explanation) => `• ${explanation}`));
+  }
+  if (item.detail) lines.push("", `🔗 ${item.detail}`);
   return lines.join("\n");
 }
 
